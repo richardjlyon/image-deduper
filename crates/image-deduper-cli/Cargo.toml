@@ -1,0 +1,23 @@
+[package]
+name = "image-deduper-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Command-line interface for the image-deduper tool"
+
+# This creates the actual binary
+[[bin]]
+name = "image-deduper"
+path = "src/main.rs"
+
+[dependencies]
+# Reference the core library
+image-deduper-core = { path = "../image-deduper-core" }
+
+# CLI specific dependencies
+clap.workspace = true
+env_logger.workspace = true
+log.workspace = true
+anyhow.workspace = true

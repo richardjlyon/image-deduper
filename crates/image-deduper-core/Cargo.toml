@@ -1,0 +1,37 @@
+[package]
+name = "image-deduper-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core library for detecting and managing duplicate images"
+
+[dependencies]
+# File handling and traversal
+walkdir.workspace = true
+rayon.workspace = true
+
+# Image processing
+image.workspace = true
+libheif-rs.workspace = true
+
+# Hashing and comparison
+blake3.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Database
+rusqlite.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Concurrency
+crossbeam.workspace = true
+
+# Logging
+log.workspace = true
