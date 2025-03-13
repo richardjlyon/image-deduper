@@ -1,7 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
+// use std::sync::Arc;
 use std::time::SystemTime;
-use serde::{Serialize, Deserialize};
 
 /// Supported image formats
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -54,36 +54,36 @@ pub struct ImageFile {
 }
 
 /// Image with extracted metadata and hash information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcessedImage {
-    /// Reference to the original image file
-    pub original: Arc<ImageFile>,
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct ProcessedImage {
+//     /// Reference to the original image file
+//     pub original: Arc<ImageFile>,
 
-    /// Perceptual hash for similarity detection
-    pub perceptual_hash: u64,
+//     /// Perceptual hash for similarity detection
+//     pub perceptual_hash: u64,
 
-    /// Cryptographic hash for exact matching
-    pub cryptographic_hash: [u8; 32],
+//     /// Cryptographic hash for exact matching
+//     pub cryptographic_hash: [u8; 32],
 
-    /// Image dimensions (width, height) if available
-    pub dimensions: Option<(u32, u32)>,
+//     /// Image dimensions (width, height) if available
+//     pub dimensions: Option<(u32, u32)>,
 
-    /// Small thumbnail for visual comparison if enabled
-    pub thumbnail: Option<Vec<u8>>,
-}
+//     /// Small thumbnail for visual comparison if enabled
+//     pub thumbnail: Option<Vec<u8>>,
+// }
 
 /// Group of duplicate images
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DuplicateGroup {
-    /// The image to keep (chosen by prioritization rules)
-    pub original: Arc<ProcessedImage>,
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct DuplicateGroup {
+//     /// The image to keep (chosen by prioritization rules)
+//     pub original: Arc<ProcessedImage>,
 
-    /// The duplicate images
-    pub duplicates: Vec<Arc<ProcessedImage>>,
+//     /// The duplicate images
+//     pub duplicates: Vec<Arc<ProcessedImage>>,
 
-    /// Similarity score between images (1.0 = exact match)
-    pub similarity_score: f64,
-}
+//     /// Similarity score between images (1.0 = exact match)
+//     pub similarity_score: f64,
+// }
 
 /// Types of actions that can be performed on duplicates
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

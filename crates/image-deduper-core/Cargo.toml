@@ -27,11 +27,11 @@ serde_json.workspace = true
 rusqlite.workspace = true
 
 # Error handling
-anyhow.workspace = true
-thiserror.workspace = true
+derive_more = { version = "2.0.1", features = ["from"] }
 
 # Concurrency
 crossbeam.workspace = true
 
 # Logging
 log.workspace = true
+tempfile = "3.18.0"
