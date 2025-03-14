@@ -1,5 +1,11 @@
 use std::path::PathBuf;
 
+pub mod image_variants;
+pub mod test_images;
+
+pub use image_variants::ImageVariant;
+pub use test_images::*;
+
 // Constants for test images
 const TEST_IMAGES_DIR: &str = "test_images";
 

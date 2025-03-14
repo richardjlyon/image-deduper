@@ -1,11 +1,9 @@
-#![allow(dead_code)]
-
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Create a test image with dummy data
-fn create_test_image(dir: &Path, name: &str, ext: &str) -> PathBuf {
+pub fn create_test_image(dir: &Path, name: &str, ext: &str) -> PathBuf {
     let file_path = dir.join(format!("{}.{}", name, ext));
     let mut file = File::create(&file_path).unwrap();
     // Write some dummy data to simulate an image
@@ -14,7 +12,7 @@ fn create_test_image(dir: &Path, name: &str, ext: &str) -> PathBuf {
 }
 
 /// Create a set of test images in the specified directory
-fn create_test_images(base_dir: &Path) -> Vec<PathBuf> {
+pub fn create_test_images(base_dir: &Path) -> Vec<PathBuf> {
     // Ensure the base directory exists
     fs::create_dir_all(base_dir).unwrap();
 
@@ -45,23 +43,18 @@ fn create_test_images(base_dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-// Can be used as a standalone binary
-fn main() {
-    // Create test images in a fixed location relative to the crate root
-    let test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("test_images");
-
-    println!("Creating test images in: {}", test_dir.display());
-
+/// Create test images in a directory, removing any existing test images first
+pub fn setup_test_images(test_dir: &Path) -> Vec<PathBuf> {
     // Delete the directory if it exists
     if test_dir.exists() {
         println!("Removing existing directory...");
-        fs::remove_dir_all(&test_dir).unwrap();
+        fs::remove_dir_all(test_dir).unwrap();
     }
 
     // Create the test images
-    create_test_images(&test_dir);
+    let files = create_test_images(test_dir);
 
     println!("Done! Test images created successfully.");
+
+    files
 }

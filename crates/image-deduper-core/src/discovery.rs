@@ -41,7 +41,7 @@ pub fn discover_images_in_directory(directory: &Path, config: &Config) -> Result
     }
 
     // Determine max depth for directory traversal
-    let max_depth = config.max_depth.unwrap_or(std::usize::MAX);
+    let max_depth = config.max_depth.unwrap_or(usize::MAX);
 
     // Walk directory and collect image files
     let mut image_files = Vec::new();
@@ -89,10 +89,7 @@ pub fn discover_images_in_directory(directory: &Path, config: &Config) -> Result
 fn get_image_format(path: &Path) -> Option<ImageFormat> {
     let ext_opt = path.extension().and_then(|ext| ext.to_str());
 
-    ext_opt.map(|ext| {
-        let format = ImageFormat::from_extension(ext);
-        format
-    })
+    ext_opt.map(ImageFormat::from_extension)
 }
 
 /// Get file metadata

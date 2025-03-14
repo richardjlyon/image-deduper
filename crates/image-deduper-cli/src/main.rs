@@ -1,5 +1,3 @@
-use image_deduper_core;
-
 fn main() {
     println!("Image Deduper CLI");
     println!("{}", image_deduper_core::hello());

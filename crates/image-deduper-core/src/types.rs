@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-// use std::sync::Arc;
 use std::time::SystemTime;
 
 /// Supported image formats
@@ -53,7 +52,7 @@ pub struct ImageFile {
     pub created: Option<SystemTime>,
 }
 
-/// Image with extracted metadata and hash information
+// Image with extracted metadata and hash information
 // #[derive(Debug, Clone, Serialize, Deserialize)]
 // pub struct ProcessedImage {
 //     /// Reference to the original image file
@@ -72,7 +71,7 @@ pub struct ImageFile {
 //     pub thumbnail: Option<Vec<u8>>,
 // }
 
-/// Group of duplicate images
+// Group of duplicate images
 // #[derive(Debug, Clone, Serialize, Deserialize)]
 // pub struct DuplicateGroup {
 //     /// The image to keep (chosen by prioritization rules)

@@ -1,4 +1,3 @@
-
 use std::path::{Path, PathBuf};
 
 // Import the items from the crate that are being tested
@@ -59,8 +58,10 @@ fn test_discover_images_with_depth_limit() {
     }
 
     // Create config with max_depth of 1 (only root directory)
-    let mut config = Config::default();
-    config.max_depth = Some(1);
+    let config = Config {
+        max_depth: Some(1),
+        ..Default::default()
+    };
 
     let discovered = discover_images_in_directory(&test_dir, &config).unwrap();
 
