@@ -18,11 +18,11 @@ pub use types::*;
 // -- Public Modules --
 pub mod config;
 pub mod discovery;
+pub mod processing;
 pub mod safety;
 pub mod types;
 // pub mod action;
 // pub mod deduplication;
-// pub mod processing;
 
 pub fn hello() -> &'static str {
     "Hello, world!"

@@ -11,7 +11,7 @@ mod test_image_variants {
     #[test]
     fn test_constructor() {
         let base_image_path = PathBuf::from(
-            "/Users/richardlyon/Code/image-deduper/crates/image-deduper-core/tests/andromeda.jpg",
+            "/Users/richardlyon/Code/image-deduper/crates/image-deduper-core/tests/test_images/andromeda.jpg",
         );
         let output_dir = PathBuf::from(
             "/Users/richardlyon/Code/image-deduper/crates/image-deduper-core/tests/output",
