@@ -1,11 +1,9 @@
 #[test]
 fn test_cryptographic_hash() {
-    use crate::common::TestImageRegistry;
+    use crate::common::TEST_IMAGES;
     use image_deduper_core::processing::compute_cryptographic;
 
-    let registry = TestImageRegistry::new();
-
-    let img_path = registry
+    let img_path = TEST_IMAGES
         .get_image_path(
             "jpg",           // file_type
             "IMG-2624x3636", // image_name

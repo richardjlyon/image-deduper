@@ -1,6 +1,5 @@
 use image::DynamicImage;
 use once_cell::sync::Lazy;
-use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -22,13 +21,15 @@ pub struct TestImageInfo {
 }
 
 /// Registry for managing and retrieving test images
+#[derive(Default)]
 pub struct TestImageRegistry {
     /// Collection of all test images organized by their properties
     images: Vec<TestImageInfo>,
 }
 
 /// Global test image registry that's initialized once
-pub static TEST_IMAGES: Lazy<TestImageRegistry> = Lazy::new(|| TestImageRegistry::new());
+#[allow(dead_code)]
+pub static TEST_IMAGES: Lazy<TestImageRegistry> = Lazy::new(TestImageRegistry::new);
 
 impl TestImageRegistry {
     /// Create a new registry by scanning the test images directory
@@ -140,7 +141,7 @@ impl TestImageRegistry {
     }
 
     /// Get all images in the registry
-    pub fn get_all_images(&self) -> &[TestImageInfo] {
+    pub fn _get_all_images(&self) -> &[TestImageInfo] {
         &self.images
     }
 
@@ -183,7 +184,7 @@ impl TestImageRegistry {
                     && transformation_parameter.map_or(true, |param| {
                         img.transformation_parameter
                             .as_ref()
-                            .map_or(false, |p| p == param)
+                            .is_some_and(|p| p == param)
                     })
             })
             .collect()

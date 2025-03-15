@@ -79,9 +79,8 @@ pub fn calculate_phash(img: &DynamicImage) -> PHash {
     for y in 0..8 {
         for x in 0..8 {
             let pixel = small.get_pixel(x, y);
-            let gray_value = (0.299 * pixel[0] as f32
-                + 0.587 * pixel[1] as f32
-                + 0.114 * pixel[2] as f32) as f32;
+            let gray_value =
+                0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
             pixels[(y as usize) * 8 + (x as usize)] = gray_value;
         }
     }
@@ -168,14 +167,12 @@ pub fn ultra_fast_phash(img: &DynamicImage) -> PHash {
 
     // Optimized bit comparisons
     let mut hash: u64 = 0;
-    let mut bit_pos = 0;
 
     // Unrolled loop for maximum performance
-    for &p in &pixels {
+    for (bit_pos, &p) in pixels.iter().enumerate() {
         if p > mean {
             hash |= 1u64 << bit_pos;
         }
-        bit_pos += 1;
     }
 
     PHash(hash)

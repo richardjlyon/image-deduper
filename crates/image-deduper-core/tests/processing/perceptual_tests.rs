@@ -1,12 +1,9 @@
-use image_deduper_core::processing::phash_from_file;
-
 #[test]
 fn test_perceptual_hash_ne() {
-    use crate::common::TestImageRegistry;
+    use crate::common::TEST_IMAGES;
+    use image_deduper_core::processing::phash_from_file;
 
-    let registry = TestImageRegistry::new();
-
-    let img1 = registry
+    let img1 = TEST_IMAGES
         .get_image_path(
             "jpg",           // file_type
             "IMG-2624x3636", // image_name
@@ -16,7 +13,7 @@ fn test_perceptual_hash_ne() {
         )
         .unwrap();
 
-    let img2 = registry
+    let img2 = TEST_IMAGES
         .get_image_path(
             "jpg",           // file_type
             "IMG-2667x4000", // image_name

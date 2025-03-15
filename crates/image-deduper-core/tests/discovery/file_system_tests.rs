@@ -1,16 +1,8 @@
-use std::path::{Path, PathBuf};
-
-use image_deduper_core::discovery::{
-    discover_images, discover_images_in_directory, has_image_extension,
-};
-use image_deduper_core::Config;
-use image_deduper_core::Error;
-
-// Import from tests::common instead of crate::common
-use super::super::common;
-
 #[test]
 fn test_is_image_path() {
+    use image_deduper_core::discovery::has_image_extension;
+    use std::path::Path;
+
     assert!(has_image_extension(Path::new("test.jpg")));
     assert!(has_image_extension(Path::new("test.jpeg")));
     assert!(has_image_extension(Path::new("test.png")));
@@ -22,8 +14,14 @@ fn test_is_image_path() {
 
 #[test]
 fn test_discover_images_in_directory() {
+    // use super::super::common;
+    use super::super::common::test::get_test_images_dir;
+    use image_deduper_core::discovery::discover_images_in_directory;
+    use image_deduper_core::Config;
+    use std::path::PathBuf;
+
     // Skip if test directory doesn't exist
-    let test_dir = common::get_test_images_dir();
+    let test_dir = get_test_images_dir();
     if !test_dir.exists() {
         println!("Test directory not found, skipping test. Run create_test_images first.");
         return;
@@ -51,8 +49,12 @@ fn test_discover_images_in_directory() {
 
 #[test]
 fn test_discover_images_with_depth_limit() {
+    use super::super::common::test::get_test_images_dir;
+    use image_deduper_core::discovery::discover_images_in_directory;
+    use image_deduper_core::Config;
+
     // Skip if test directory doesn't exist
-    let test_dir = common::get_test_images_dir();
+    let test_dir = get_test_images_dir();
     if !test_dir.exists() {
         println!("Test directory not found, skipping test. Run create_test_images first.");
         return;
@@ -77,15 +79,20 @@ fn test_discover_images_with_depth_limit() {
 
 #[test]
 fn test_discover_images_multiple_directories() {
+    use super::super::common::test::{get_test_images_dir, get_test_images_subdir};
+    use image_deduper_core::discovery::discover_images;
+    use image_deduper_core::Config;
+    use std::path::PathBuf;
+
     // Skip if test directory doesn't exist
-    let test_dir1 = common::get_test_images_dir();
+    let test_dir1 = get_test_images_dir();
     if !test_dir1.exists() {
         println!("Test directory not found, skipping test. Run create_test_images first.");
         return;
     }
 
     // For testing multiple directories, use the subdirectory as a second directory
-    let test_dir2 = common::get_test_images_subdir();
+    let test_dir2 = get_test_images_subdir();
 
     let config = Config::default();
     let directories = vec![test_dir1.clone(), test_dir2.clone()];
@@ -112,6 +119,11 @@ fn test_discover_images_multiple_directories() {
 
 #[test]
 fn test_discover_images_nonexistent_directory() {
+    use image_deduper_core::discovery::discover_images_in_directory;
+    use image_deduper_core::Config;
+    use image_deduper_core::Error;
+    use std::path::Path;
+
     let config = Config::default();
     let result = discover_images_in_directory(Path::new("/path/that/does/not/exist"), &config);
 

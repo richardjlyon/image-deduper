@@ -6,8 +6,7 @@
 #[path = "../tests/mod.rs"]
 mod tests;
 
-use std::path::Path;
-use tests::common::{TestImageInfo, TestImageRegistry};
+use tests::common::TestImageRegistry;
 
 fn main() {
     // Initialize the registry

@@ -1,3 +1,1 @@
-mod bench;
-
-pub use bench::*;
+mod bench_testing;
