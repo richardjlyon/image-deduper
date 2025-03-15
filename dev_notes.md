@@ -6,28 +6,28 @@ Architecture:
 - Action manager
 
 File discovery:
-
+--------------
 Filesystem → Image File Catalog → Processing Queue
 
-- Recursive directory traversal with configurable depth
-- Multi-threaded file scanning for performance
-- Support for all required formats (JPEG, PNG, TIFF, HEIC)
+x Recursive directory traversal with configurable depth
+x Multi-threaded file scanning for performance
+x Support for all required formats (JPEG, PNG, TIFF, HEIC) (RAW?)
 - Metadata extraction (creation date, dimensions, etc.)
 - Exclusion patterns for directories/files to skip
 
 Image processing:
+----------------
+Raw Image → Hash Generator → Comparison Engine
 
-  Raw Image → Hash Generator → Comparison Engine
-
-- Primary hash method: Perceptual hashing (pHash) for near-duplicate detection
-- Secondary verification: Pixel-by-pixel comparison for confirmed duplicates
-- HEIC format support via third-party library (libheif bindings)
+x Primary hash method: Perceptual hashing (pHash) for near-duplicate detection
+x Secondary verification: Pixel-by-pixel comparison for confirmed duplicates
+x HEIC format support via third-party library (libheif bindings)
 - Thumbnail generation for visual verification
 - Parallel processing with work stealing for efficiency
 
-Deduplication Engine
-
-  Hash Database → Duplicate Groups → Decision Engine
+Deduplication Engine:
+--------------------
+Hash Database → Duplicate Groups → Decision Engine
 
 - Persistence layer to maintain state between runs
 - Grouping of similar/identical images
