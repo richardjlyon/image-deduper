@@ -1,6 +1,6 @@
 #[test]
 fn test_process_images() {
-    use crate::common::TEST_IMAGES;
+    use super::super::common::test_image_registry::TEST_IMAGES;
     use image_deduper_core::processing::process_images;
 
     let img1 = TEST_IMAGES
@@ -8,8 +8,7 @@ fn test_process_images() {
             "jpg",           // file_type
             "IMG-2624x3636", // image_name
             "original",      // transformation
-            None,            // transformation_parameter
-            None,            // index
+            None,            // transformation_parameter        // index
         )
         .unwrap();
 
@@ -18,8 +17,7 @@ fn test_process_images() {
             "jpg",           // file_type
             "IMG-2667x4000", // image_name
             "original",      // transformation
-            None,            // transformation_parameter
-            None,            // index
+            None,            // transformation_parameter           // index
         )
         .unwrap();
 

@@ -1,6 +1,6 @@
 #[test]
 fn test_cryptographic_hash() {
-    use crate::common::TEST_IMAGES;
+    use super::super::common::test_image_registry::TEST_IMAGES;
     use image_deduper_core::processing::compute_cryptographic;
 
     let img_path = TEST_IMAGES
@@ -8,8 +8,7 @@ fn test_cryptographic_hash() {
             "jpg",           // file_type
             "IMG-2624x3636", // image_name
             "original",      // transformation
-            None,            // transformation_parameter
-            None,            // index
+            None,            // transformation_parameter    // index
         )
         .unwrap();
 

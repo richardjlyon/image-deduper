@@ -15,8 +15,6 @@ pub struct TestImageInfo {
     /// Parameter of the transformation (e.g., "800x600", "1.5")
     pub transformation_parameter: Option<String>,
     /// Index number of the image
-    pub index: Option<u32>,
-    /// File type/extension (e.g., "jpg", "png")
     pub file_type: String,
 }
 
@@ -102,7 +100,6 @@ impl TestImageRegistry {
                 image_name,
                 transformation: "original".to_string(),
                 transformation_parameter: None,
-                index: None,
                 file_type,
             });
         } else if parts.len() >= 3 {
@@ -111,27 +108,23 @@ impl TestImageRegistry {
             // Check if there's a transformation parameter
             if parts.len() == 3 {
                 // Pattern: ImageName_Transformation_Index.ext
-                let index = parts[2].parse::<u32>().ok();
 
                 return Some(TestImageInfo {
                     path: path.to_path_buf(),
                     image_name,
                     transformation,
                     transformation_parameter: None,
-                    index,
                     file_type,
                 });
             } else if parts.len() >= 4 {
                 // Pattern: ImageName_Transformation_Parameter_Index.ext
                 let transformation_parameter = Some(parts[2].to_string());
-                let index = parts[3].parse::<u32>().ok();
 
                 return Some(TestImageInfo {
                     path: path.to_path_buf(),
                     image_name,
                     transformation,
                     transformation_parameter,
-                    index,
                     file_type,
                 });
             }
@@ -152,7 +145,6 @@ impl TestImageRegistry {
         image_name: &str,
         transformation: &str,
         transformation_parameter: Option<&str>,
-        index: Option<u32>,
     ) -> Option<&TestImageInfo> {
         self.images.iter().find(|img| {
             img.file_type == file_type
@@ -163,7 +155,6 @@ impl TestImageRegistry {
                     (None, None) => true,
                     _ => false,
                 }
-                && img.index == index
         })
     }
 
@@ -197,14 +188,12 @@ impl TestImageRegistry {
         image_name: &str,
         transformation: &str,
         transformation_parameter: Option<&str>,
-        index: Option<u32>,
     ) -> Option<PathBuf> {
         self.find_image(
             file_type,
             image_name,
             transformation,
             transformation_parameter,
-            index,
         )
         .map(|info| info.path.clone())
     }
@@ -216,14 +205,12 @@ impl TestImageRegistry {
         image_name: &str,
         transformation: &str,
         transformation_parameter: Option<&str>,
-        index: Option<u32>,
     ) -> Option<DynamicImage> {
         self.get_image_path(
             file_type,
             image_name,
             transformation,
             transformation_parameter,
-            index,
         )
         .and_then(|path| image::open(&path).ok())
     }
@@ -258,9 +245,7 @@ impl TestImageRegistry {
             if let Some(param) = &img.transformation_parameter {
                 println!("   - Parameter: {}", param);
             }
-            if let Some(idx) = img.index {
-                println!("   - Index: {}", idx);
-            }
+
             println!();
         }
     }
@@ -278,7 +263,6 @@ mod tests {
         assert_eq!(info.image_name, "IMG-2624x3636");
         assert_eq!(info.transformation, "original");
         assert_eq!(info.transformation_parameter, None);
-        assert_eq!(info.index, None);
         assert_eq!(info.file_type, "jpg");
 
         // Test transformation with parameter and index
@@ -287,7 +271,6 @@ mod tests {
         assert_eq!(info.image_name, "IMG-2624x3636");
         assert_eq!(info.transformation, "resize");
         assert_eq!(info.transformation_parameter, Some("800x600".to_string()));
-        assert_eq!(info.index, Some(1));
         assert_eq!(info.file_type, "jpg");
 
         // Test transformation without parameter
@@ -296,7 +279,6 @@ mod tests {
         assert_eq!(info.image_name, "IMG-2624x3636");
         assert_eq!(info.transformation, "crop");
         assert_eq!(info.transformation_parameter, None);
-        assert_eq!(info.index, Some(9));
         assert_eq!(info.file_type, "jpg");
     }
 }
