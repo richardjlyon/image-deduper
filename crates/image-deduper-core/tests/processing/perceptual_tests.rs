@@ -38,8 +38,8 @@ fn test_phash_distance() {
         .get_image_path(
             "jpg",           // file_type
             "IMG-2624x3636", // image_name
-            "compress",      // transformation
-            Some("20"),      // transformation_parameter     // index
+            "original",      // transformation
+            None,            // transformation_parameter     // index
         )
         .unwrap();
 
@@ -47,16 +47,17 @@ fn test_phash_distance() {
         .get_image_path(
             "jpg",           // file_type
             "IMG-2624x3636", // image_name
-            "compress",      // transformation
-            Some("90"),      // transformation_parameter     // index
+            "rotate",        // transformation
+            Some("5"),       // transformation_parameter     // index
         )
         .unwrap();
 
     let phash_img1 = phash_from_file(&img1).unwrap();
     let phash_img2 = phash_from_file(&img2).unwrap();
 
-    let _distance = phash_img1.distance(&phash_img2);
+    let distance = phash_img1.distance(&phash_img2);
     println!("phash_img1: {:?}", phash_img1);
     println!("phash_img2: {:?}", phash_img2);
+    println!("distance: {:?}", distance);
     // assert_eq!(distance, 1);
 }
