@@ -6,10 +6,18 @@ mod bench {
         time::{Duration, Instant},
     };
 
+    // Use a direct function rather than trying to load the module
+    fn get_test_image() -> image::DynamicImage {
+        // This implementation is the same as in tests/common/test_images.rs
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/test_images/jpg/IMG-2624x3636/IMG-2624x3636_original.jpg");
+        image::open(&path).expect("Failed to open test image")
+    }
+
     fn bench_hash_methods() {
-        let file_path =
-            Path::new("/Users/richardlyon/Desktop/test-images/original_images/2024-10-05-1.jpg");
-        let img = image::open(file_path).unwrap();
+        // Use the test image function
+        let img = get_test_image();
+
         println!("Image dimensions: {}x{}", img.width(), img.height());
 
         // Benchmark original method

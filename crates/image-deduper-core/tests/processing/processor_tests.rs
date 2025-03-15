@@ -1,17 +1,38 @@
-use std::path::PathBuf;
-
 use image_deduper_core::processing::process_images;
 
 #[test]
 fn test_process_images() {
-    let images = vec![
-        PathBuf::from("/Users/richardlyon/Code/image-deduper/crates/image-deduper-core/tests/test_images/andromeda.jpg"),
-        PathBuf::from("/Users/richardlyon/Code/image-deduper/crates/image-deduper-core/tests/test_images/andromeda.jpg"),
-    ];
-    let results = process_images(&images);
-    assert_eq!(results.len(), 2);
+    use crate::common::TestImageRegistry;
 
-    let expected_hash = "63dd202f81edc4f5d1929361dc84c19aa5a5cb1f80fd4eb2c654e9a335e7db88";
-    assert_eq!(results[0].cryptographic.to_string(), expected_hash);
-    assert_eq!(results[1].cryptographic.to_string(), expected_hash);
+    let registry = TestImageRegistry::new();
+
+    let img1 = registry
+        .get_image_path(
+            "jpg",           // file_type
+            "IMG-2624x3636", // image_name
+            "original",      // transformation
+            None,            // transformation_parameter
+            None,            // index
+        )
+        .unwrap();
+
+    let img2 = registry
+        .get_image_path(
+            "jpg",           // file_type
+            "IMG-2667x4000", // image_name
+            "original",      // transformation
+            None,            // transformation_parameter
+            None,            // index
+        )
+        .unwrap();
+
+    let images = vec![img1, img2];
+    let results = process_images(&images);
+
+    let expected_hash_1 = "0adc4958a3bfdb3ab5d3d747aa5982045dae251667e237e8dd8d38f9778d92cc";
+    let expected_hash_2 = "4ffaeacb536fb65fb32bc75b7cc5a230d1879290aa36ddc9a98fae7b1cf37e0c";
+
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].cryptographic.to_string(), expected_hash_1);
+    assert_eq!(results[1].cryptographic.to_string(), expected_hash_2);
 }

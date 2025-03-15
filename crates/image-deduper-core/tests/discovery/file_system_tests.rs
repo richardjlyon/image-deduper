@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 
-// Import the items from the crate that are being tested
-use crate::common;
 use image_deduper_core::discovery::{
     discover_images, discover_images_in_directory, has_image_extension,
 };
 use image_deduper_core::Config;
 use image_deduper_core::Error;
+
+// Import from tests::common instead of crate::common
+use super::super::common;
 
 #[test]
 fn test_is_image_path() {
