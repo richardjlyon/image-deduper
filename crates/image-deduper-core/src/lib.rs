@@ -16,13 +16,14 @@ pub use error::{Error, Result};
 pub use types::*;
 
 // -- Public Modules --
+pub mod action;
 pub mod config;
 pub mod discovery;
+pub mod persistence;
 pub mod processing;
 pub mod safety;
 pub mod types;
 pub mod utils;
-// pub mod action;
 // pub mod deduplication;
 
 pub fn hello() -> &'static str {
