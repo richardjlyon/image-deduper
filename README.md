@@ -101,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Scan directories
     let directories = vec!["~/Pictures".into()];
-    deduper.run(&directories)?;
+    deduper.run(&directories, false)?;  // false = don't force rescan
 
     Ok(())
 }

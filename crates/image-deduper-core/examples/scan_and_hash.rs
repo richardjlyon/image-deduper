@@ -20,7 +20,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let directories = vec![PathBuf::from("test_data/real_images")];
 
     // Run and handle any errors
-    match deduper.run(&directories) {
+    match deduper.run(&directories, false) {
+        // false = don't force rescan
         Ok(_) => {
             info!("Successfully processed all images");
             Ok(())

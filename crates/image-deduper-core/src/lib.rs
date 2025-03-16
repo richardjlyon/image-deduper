@@ -56,6 +56,7 @@ impl ImageDeduper {
     pub fn process_images(
         &self,
         images: Vec<types::ImageFile>,
+        force_rescan: bool,
     ) -> Result<Vec<types::ProcessedImage>> {
         let batch_size = self.config.batch_size.unwrap_or(100);
         let mut batch = Vec::with_capacity(batch_size);
@@ -72,7 +73,32 @@ impl ImageDeduper {
             std::path::PathBuf::from("image_deduper.db")
         };
 
+        let mut db = persistence::create_database_if_not_exists(&db_path)?;
+
         for (i, img) in images.into_iter().enumerate() {
+            // Only check database if we're not forcing a rescan
+            if !force_rescan {
+                if let Ok(stored_image) = db.get_image_by_path(&img.path) {
+                    // Convert Vec<u8> to [u8; 32] for Blake3 hash
+                    let chash: [u8; 32] =
+                        stored_image.cryptographic_hash.try_into().map_err(|_| {
+                            Error::Unknown(format!(
+                                "Invalid cryptographic hash length for {}",
+                                img.path.display()
+                            ))
+                        })?;
+
+                    let processed_image = types::ProcessedImage {
+                        original: Arc::new(img),
+                        cryptographic_hash: chash.into(),
+                        perceptual_hash: processing::PHash(stored_image.perceptual_hash),
+                    };
+                    processed.push(processed_image);
+                    continue;
+                }
+            }
+
+            // Process image if it's not in database or if force_rescan is true
             let chash = processing::compute_cryptographic(&img.path)?;
             let phash = processing::phash_from_file(&img.path)?;
 
@@ -86,7 +112,7 @@ impl ImageDeduper {
 
             if batch.len() >= batch_size || i == total_images - 1 {
                 if !batch.is_empty() {
-                    persistence::save_processed_images(&db_path, &batch)?;
+                    db.save_processed_images(&batch)?;
                     batch.clear();
                 }
             }
@@ -111,15 +137,15 @@ impl ImageDeduper {
     // }
 
     /// Run the full deduplication pipeline
-    pub fn run(&self, directories: &[impl AsRef<Path>]) -> Result<()> {
+    pub fn run(&self, directories: &[impl AsRef<Path>], force_rescan: bool) -> Result<()> {
         // Discover images
         info!("Discovering images...");
         let images = self.discover_images(directories)?;
         info!("Found {} images", images.len());
 
-        // Process and persist image
+        // Process and persist images
         info!("Processing images...");
-        let processed_images = self.process_images(images)?;
+        let processed_images = self.process_images(images, force_rescan)?;
         info!("Processed {} images", processed_images.len());
 
         for img in processed_images {
