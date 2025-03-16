@@ -13,6 +13,7 @@ mod error;
 // -- Flatten
 pub use config::*;
 pub use error::{Error, Result};
+use indicatif::{ProgressBar, ProgressStyle};
 use log::info;
 pub use types::*;
 
@@ -63,6 +64,17 @@ impl ImageDeduper {
         let mut processed = Vec::with_capacity(images.len());
         let total_images = images.len();
 
+        // Set up progress bar
+        let progress = ProgressBar::new(total_images as u64);
+        progress.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+                )
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+
         // Get database path from config or use default
         let db_path = if self.config.use_database {
             self.config
@@ -94,6 +106,7 @@ impl ImageDeduper {
                         perceptual_hash: processing::PHash(stored_image.perceptual_hash),
                     };
                     processed.push(processed_image);
+                    progress.inc(1);
                     continue;
                 }
             }
@@ -109,6 +122,7 @@ impl ImageDeduper {
             };
             batch.push(processed_image.clone());
             processed.push(processed_image);
+            progress.inc(1);
 
             if batch.len() >= batch_size || i == total_images - 1 {
                 if !batch.is_empty() {
@@ -118,6 +132,7 @@ impl ImageDeduper {
             }
         }
 
+        progress.finish_with_message("Processing complete");
         Ok(processed)
     }
 

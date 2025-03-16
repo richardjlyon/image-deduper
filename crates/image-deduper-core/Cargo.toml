@@ -30,6 +30,9 @@ anyhow = { workspace = true }
 crossbeam.workspace = true
 num_cpus = "1.16"
 
+# Progress bars
+indicatif = "0.17"
+
 # Logging
 log.workspace = true
 env_logger.workspace = true
