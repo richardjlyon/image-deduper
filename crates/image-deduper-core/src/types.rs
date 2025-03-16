@@ -1,6 +1,10 @@
+use blake3::Hash;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::SystemTime;
+
+use crate::processing::PHash;
 
 /// Supported image formats
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -52,24 +56,23 @@ pub struct ImageFile {
     pub created: Option<SystemTime>,
 }
 
-// Image with extracted metadata and hash information
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct ProcessedImage {
-//     /// Reference to the original image file
-//     pub original: Arc<ImageFile>,
+/// Image with extracted metadata and hash information
+#[derive(Debug, Clone)]
+pub struct ProcessedImage {
+    /// Reference to the original image file
+    pub original: Arc<ImageFile>,
 
-//     /// Perceptual hash for similarity detection
-//     pub perceptual_hash: u64,
+    /// Perceptual hash for similarity detection
+    pub perceptual_hash: PHash,
 
-//     /// Cryptographic hash for exact matching
-//     pub cryptographic_hash: [u8; 32],
+    /// Cryptographic hash for exact matching
+    pub cryptographic_hash: Hash,
+    // Image dimensions (width, height) if available
+    // pub dimensions: Option<(u32, u32)>,
 
-//     /// Image dimensions (width, height) if available
-//     pub dimensions: Option<(u32, u32)>,
-
-//     /// Small thumbnail for visual comparison if enabled
-//     pub thumbnail: Option<Vec<u8>>,
-// }
+    // Small thumbnail for visual comparison if enabled
+    // pub thumbnail: Option<Vec<u8>>,
+}
 
 // Group of duplicate images
 // #[derive(Debug, Clone, Serialize, Deserialize)]

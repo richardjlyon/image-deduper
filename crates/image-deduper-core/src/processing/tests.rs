@@ -2,9 +2,9 @@
 #[cfg(test)]
 mod tests {
     use crate::processing::{compute_cryptographic, phash_from_file, process_images};
-
+    use crate::test_utils::test_support::test_image_registry::TEST_IMAGES;
     // Use the test image registry from test_support
-    use crate::test_support::test_image_registry::TEST_IMAGES;
+    // use crate::test_support::test_image_registry::TEST_IMAGES;
 
     #[test]
     fn test_cryptographic_hash() {

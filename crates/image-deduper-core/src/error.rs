@@ -9,7 +9,7 @@ pub enum Error {
     Io(std::io::Error),
 
     /// Image processing error
-    Image(String),
+    Image(image::ImageError),
 
     /// File not found error
     FileNotFound(PathBuf),
@@ -33,11 +33,17 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl From<image::ImageError> for Error {
+    fn from(err: image::ImageError) -> Self {
+        Error::Image(err)
+    }
+}
+
 impl core::fmt::Display for Error {
     fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
         match self {
             Error::Io(err) => write!(fmt, "I/O error: {}", err),
-            Error::Image(msg) => write!(fmt, "Image processing error: {}", msg),
+            Error::Image(err) => write!(fmt, "Image processing error: {}", err),
             Error::FileNotFound(path) => write!(fmt, "File not found: {}", path.display()),
             Error::Configuration(msg) => write!(fmt, "Invalid configuration: {}", msg),
             Error::SafetyCheck(msg) => write!(fmt, "Safety check failed: {}", msg),
@@ -51,6 +57,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Io(err) => Some(err),
+            Error::Image(err) => Some(err),
             _ => None,
         }
     }

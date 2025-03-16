@@ -24,14 +24,21 @@ rusqlite.workspace = true
 
 # Error handling
 derive_more = { version = "2.0.1", features = ["from"] }
+anyhow = { workspace = true }
 
 # Concurrency
 crossbeam.workspace = true
+num_cpus = "1.16"
 
 # Logging
 log.workspace = true
+env_logger.workspace = true
 ndarray = "0.16.1"
 rustdct = "0.7.1"
+
+# HTTP client and async runtime (for examples)
+reqwest = { version = "0.11", features = ["blocking"] }
+tokio = { version = "1.36", features = ["full"] }
 
 [dev-dependencies]
 image.workspace = true

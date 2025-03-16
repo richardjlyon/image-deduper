@@ -74,6 +74,9 @@ pub struct Config {
     /// Path to the database file
     pub database_path: Option<PathBuf>,
 
+    /// Batch size for processing images
+    pub batch_size: Option<usize>,
+
     /// Log level
     pub log_level: LogLevel,
 }
@@ -98,6 +101,7 @@ impl Default for Config {
             ],
             use_database: true,
             database_path: Some(PathBuf::from("image-deduper.db")),
+            batch_size: Some(100),
             log_level: LogLevel::Info,
         }
     }

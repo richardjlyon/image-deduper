@@ -65,7 +65,7 @@ impl Database {
                 format TEXT NOT NULL,
                 created INTEGER,
                 cryptographic_hash BLOB NOT NULL,
-                perceptual_hash INTEGER NOT NULL
+                perceptual_hash TEXT NOT NULL
             );
 
             -- Create indexes for efficient lookups
@@ -189,7 +189,7 @@ impl Database {
                     format_str,
                     image.created,
                     image.cryptographic_hash,
-                    image.perceptual_hash,
+                    image.perceptual_hash.to_string(),
                 ],
             )
             .map(|_| self.conn.last_insert_rowid())?;
@@ -290,6 +290,68 @@ impl Database {
         let count = self.conn.execute("DELETE FROM images", params![])?;
         Ok(count)
     }
+
+    /// Save a batch of processed images to the database
+    pub fn save_processed_images(
+        &mut self,
+        images: &[crate::types::ProcessedImage],
+    ) -> PersistenceResult<()> {
+        let tx = self.conn.transaction()?;
+
+        for image in images {
+            let stored_image = StoredImage::new(
+                &image.original,
+                image.cryptographic_hash.as_bytes().to_vec(),
+                image.perceptual_hash.0,
+            );
+
+            // Path string
+            let path_str = stored_image.path.to_string_lossy().to_string();
+
+            // Format string
+            let format_str = match &stored_image.format {
+                ImageFormat::Jpeg => "jpeg",
+                ImageFormat::Png => "png",
+                ImageFormat::Tiff => "tiff",
+                ImageFormat::Heic => "heic",
+                ImageFormat::Other(s) => s,
+            };
+
+            // Check if image already exists by path
+            let exists = tx
+                .query_row(
+                    "SELECT 1 FROM images WHERE path = ?1",
+                    params![path_str],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+
+            if exists {
+                continue;
+            }
+
+            // Insert the image
+            tx.execute(
+                "INSERT INTO images
+                (path, size, last_modified, format, created, cryptographic_hash, perceptual_hash)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    path_str,
+                    stored_image.size,
+                    stored_image.last_modified,
+                    format_str,
+                    stored_image.created,
+                    stored_image.cryptographic_hash,
+                    stored_image.perceptual_hash.to_string(),
+                ],
+            )?;
+        }
+
+        // Commit the transaction
+        tx.commit()?;
+
+        Ok(())
+    }
 }
 
 /// Helper function to convert a database row to a StoredImage
@@ -301,7 +363,8 @@ fn row_to_stored_image(row: &rusqlite::Row) -> StoredImage {
     let format_str: String = row.get(4).unwrap();
     let created: Option<i64> = row.get(5).unwrap();
     let cryptographic_hash: Vec<u8> = row.get(6).unwrap();
-    let perceptual_hash: u64 = row.get(7).unwrap();
+    let perceptual_hash_str: String = row.get(7).unwrap();
+    let perceptual_hash = perceptual_hash_str.parse::<u64>().unwrap_or(0);
 
     let format = match format_str.as_str() {
         "jpeg" => ImageFormat::Jpeg,
@@ -390,4 +453,13 @@ pub fn get_image_by_perceptual_hash<P: AsRef<Path>>(
 ) -> PersistenceResult<StoredImage> {
     let db = open_database(db_path)?;
     db.get_image_by_perceptual_hash(hash)
+}
+
+/// Save a batch of processed images to the database
+pub fn save_processed_images<P: AsRef<Path>>(
+    db_path: P,
+    images: &[crate::types::ProcessedImage],
+) -> PersistenceResult<()> {
+    let mut db = create_database_if_not_exists(db_path)?;
+    db.save_processed_images(images)
 }

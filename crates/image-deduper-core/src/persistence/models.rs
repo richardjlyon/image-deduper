@@ -36,17 +36,13 @@ pub struct StoredImage {
 impl StoredImage {
     /// Create a new stored image from an image file and its hashes
     pub fn new(image: &ImageFile, cryptographic_hash: Vec<u8>, perceptual_hash: u64) -> Self {
-        // Convert SystemTime to Unix timestamp (seconds since epoch)
-        let last_modified = system_time_to_unix_timestamp(&image.last_modified);
-        let created = image.created.as_ref().map(system_time_to_unix_timestamp);
-
         Self {
             id: None,
             path: image.path.clone(),
             size: image.size,
-            last_modified,
+            last_modified: system_time_to_unix_timestamp(&image.last_modified),
             format: image.format.clone(),
-            created,
+            created: image.created.as_ref().map(system_time_to_unix_timestamp),
             cryptographic_hash,
             perceptual_hash,
         }
@@ -71,12 +67,24 @@ impl StoredImage {
 
 // Helper function to convert SystemTime to Unix timestamp
 fn system_time_to_unix_timestamp(time: &SystemTime) -> i64 {
-    time.duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(duration) => {
+            let secs = duration.as_secs();
+            if secs > i64::MAX as u64 {
+                i64::MAX
+            } else {
+                secs as i64
+            }
+        }
+        Err(_) => 0,
+    }
 }
 
 // Helper function to convert Unix timestamp to SystemTime
 fn unix_timestamp_to_system_time(timestamp: i64) -> SystemTime {
-    SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(timestamp.max(0) as u64)
+    if timestamp < 0 {
+        SystemTime::UNIX_EPOCH
+    } else {
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(timestamp as u64)
+    }
 }
