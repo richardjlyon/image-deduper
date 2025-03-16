@@ -6,6 +6,9 @@
 //! - Duplicate detection algorithms
 //! - Safe file operations
 
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rayon::prelude::*;
 use std::{path::Path, sync::Arc};
 
 mod error;
@@ -60,8 +63,6 @@ impl ImageDeduper {
         force_rescan: bool,
     ) -> Result<Vec<types::ProcessedImage>> {
         let batch_size = self.config.batch_size.unwrap_or(100);
-        let mut batch = Vec::with_capacity(batch_size);
-        let mut processed = Vec::with_capacity(images.len());
         let total_images = images.len();
 
         // Set up progress bar
@@ -75,6 +76,9 @@ impl ImageDeduper {
                 .progress_chars("#>-"),
         );
 
+        // Create a thread-safe progress bar
+        let progress = Arc::new(progress);
+
         // Get database path from config or use default
         let db_path = if self.config.use_database {
             self.config
@@ -85,53 +89,91 @@ impl ImageDeduper {
             std::path::PathBuf::from("image_deduper.db")
         };
 
-        let mut db = persistence::create_database_if_not_exists(&db_path)?;
+        // Create a connection pool
+        let manager = SqliteConnectionManager::file(&db_path);
+        let pool = Pool::builder()
+            .max_size(num_cpus::get() as u32) // One connection per CPU core
+            .build(manager)
+            .map_err(|e| Error::Unknown(format!("Failed to create connection pool: {}", e)))?;
 
-        for (i, img) in images.into_iter().enumerate() {
-            // Only check database if we're not forcing a rescan
-            if !force_rescan {
-                if let Ok(stored_image) = db.get_image_by_path(&img.path) {
-                    // Convert Vec<u8> to [u8; 32] for Blake3 hash
-                    let chash: [u8; 32] =
-                        stored_image.cryptographic_hash.try_into().map_err(|_| {
-                            Error::Unknown(format!(
-                                "Invalid cryptographic hash length for {}",
-                                img.path.display()
-                            ))
-                        })?;
+        // Initialize the database schema
+        let conn = pool
+            .get()
+            .map_err(|e| Error::Unknown(format!("Failed to get database connection: {}", e)))?;
+        persistence::initialize_database(&conn)?;
+
+        // Process images in parallel
+        let processed: Result<Vec<_>> = images
+            .into_par_iter()
+            .map(|img| {
+                let progress = Arc::clone(&progress);
+                let pool = Arc::new(pool.clone());
+
+                let result = if !force_rescan {
+                    // Get a connection from the pool
+                    let conn = pool.get().map_err(|e| {
+                        Error::Unknown(format!("Failed to get database connection: {}", e))
+                    })?;
+
+                    // Try to get from database first
+                    if let Ok(stored_image) =
+                        persistence::get_image_by_path_with_conn(&conn, &img.path)
+                    {
+                        // Convert Vec<u8> to [u8; 32] for Blake3 hash
+                        let chash: [u8; 32] =
+                            stored_image.cryptographic_hash.try_into().map_err(|_| {
+                                Error::Unknown(format!(
+                                    "Invalid cryptographic hash length for {}",
+                                    img.path.display()
+                                ))
+                            })?;
+
+                        Ok(types::ProcessedImage {
+                            original: Arc::new(img),
+                            cryptographic_hash: chash.into(),
+                            perceptual_hash: processing::PHash(stored_image.perceptual_hash),
+                        })
+                    } else {
+                        // Not in database, process it
+                        let chash = processing::compute_cryptographic(&img.path)?;
+                        let phash = processing::phash_from_file(&img.path)?;
+
+                        let processed_image = types::ProcessedImage {
+                            original: Arc::new(img),
+                            cryptographic_hash: chash,
+                            perceptual_hash: phash,
+                        };
+
+                        // Save to database
+                        persistence::save_processed_image_with_conn(&conn, &processed_image)?;
+                        Ok(processed_image)
+                    }
+                } else {
+                    // Force rescan, always process
+                    let conn = pool.get().map_err(|e| {
+                        Error::Unknown(format!("Failed to get database connection: {}", e))
+                    })?;
+
+                    let chash = processing::compute_cryptographic(&img.path)?;
+                    let phash = processing::phash_from_file(&img.path)?;
 
                     let processed_image = types::ProcessedImage {
                         original: Arc::new(img),
-                        cryptographic_hash: chash.into(),
-                        perceptual_hash: processing::PHash(stored_image.perceptual_hash),
+                        cryptographic_hash: chash,
+                        perceptual_hash: phash,
                     };
-                    processed.push(processed_image);
-                    progress.inc(1);
-                    continue;
-                }
-            }
 
-            // Process image if it's not in database or if force_rescan is true
-            let chash = processing::compute_cryptographic(&img.path)?;
-            let phash = processing::phash_from_file(&img.path)?;
+                    // Save to database
+                    persistence::save_processed_image_with_conn(&conn, &processed_image)?;
+                    Ok(processed_image)
+                };
 
-            let processed_image = types::ProcessedImage {
-                original: Arc::new(img),
-                cryptographic_hash: chash,
-                perceptual_hash: phash,
-            };
-            batch.push(processed_image.clone());
-            processed.push(processed_image);
-            progress.inc(1);
+                progress.inc(1);
+                result
+            })
+            .collect();
 
-            if batch.len() >= batch_size || i == total_images - 1 {
-                if !batch.is_empty() {
-                    db.save_processed_images(&batch)?;
-                    batch.clear();
-                }
-            }
-        }
-
+        let processed = processed?;
         progress.finish_with_message("Processing complete");
         Ok(processed)
     }

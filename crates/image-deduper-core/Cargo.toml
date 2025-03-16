@@ -20,7 +20,10 @@ serde.workspace = true
 serde_json.workspace = true
 
 # Database
-rusqlite.workspace = true
+rusqlite = { version = "0.30", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.23"
+num_cpus = "1.16"
 
 # Error handling
 derive_more = { version = "2.0.1", features = ["from"] }
@@ -28,7 +31,6 @@ anyhow = { workspace = true }
 
 # Concurrency
 crossbeam.workspace = true
-num_cpus = "1.16"
 
 # Progress bars
 indicatif = "0.17"
