@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let deduper = ImageDeduper::new(config);
 
     // Specify directories to scan (relative to the crate directory)
-    let directories = vec![PathBuf::from("test_data/real_images")];
+    let directories = vec![PathBuf::from("/Volumes/SamsungT9/Mylio_22c15a")];
 
     // Run and handle any errors
     match deduper.run(&directories, false) {

@@ -29,3 +29,12 @@ Cargo.lock
 # Build output
 dist/
 build/
+
+# Sqllite
+*.db
+*.db-journal
+*.db-trace
+*.db-wal
+*.db-lock
+*.db-shm
+*.db-trace

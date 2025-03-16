@@ -142,7 +142,8 @@ mod tests;
 
 pub use db::{
     add_image, clear_database, create_database_if_not_exists, get_image_by_crypto_hash,
-    get_image_by_path, get_image_by_perceptual_hash, open_database, remove_image,
+    get_image_by_path, get_image_by_path_with_conn, get_image_by_perceptual_hash,
+    initialize_database, open_database, remove_image, save_processed_image_with_conn,
     save_processed_images, Database,
 };
 pub use error::{PersistenceError, PersistenceResult};

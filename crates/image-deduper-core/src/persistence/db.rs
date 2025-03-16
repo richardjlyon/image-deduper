@@ -1,10 +1,12 @@
+use r2d2::PooledConnection;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::error::{PersistenceError, PersistenceResult};
 use super::models::StoredImage;
-use crate::types::ImageFormat;
+use crate::types::{ImageFormat, ProcessedImage};
 
 /// Database version for schema migrations
 const DB_VERSION: i32 = 1;
@@ -462,4 +464,154 @@ pub fn save_processed_images<P: AsRef<Path>>(
 ) -> PersistenceResult<()> {
     let mut db = create_database_if_not_exists(db_path)?;
     db.save_processed_images(images)
+}
+
+/// Initialize the database schema
+pub fn initialize_database(
+    conn: &PooledConnection<SqliteConnectionManager>,
+) -> PersistenceResult<()> {
+    // First check if the tables already exist
+    let table_count: i32 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='images'",
+            params![],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    if table_count > 0 {
+        // Schema exists, check version
+        let version: i32 = conn.query_row("PRAGMA user_version", params![], |row| row.get(0))?;
+
+        if version < DB_VERSION {
+            // Update schema if needed
+            migrate_schema(conn, version)?;
+        }
+
+        return Ok(());
+    }
+
+    // Create tables
+    conn.execute_batch(
+        "BEGIN;
+        CREATE TABLE IF NOT EXISTS images (
+            id INTEGER PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE,
+            size INTEGER NOT NULL,
+            last_modified INTEGER NOT NULL,
+            format TEXT NOT NULL,
+            created INTEGER,
+            cryptographic_hash BLOB NOT NULL,
+            perceptual_hash TEXT NOT NULL
+        );
+
+        -- Create indexes for efficient lookups
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_images_path ON images(path);
+        CREATE INDEX IF NOT EXISTS idx_images_crypto_hash ON images(cryptographic_hash);
+        CREATE INDEX IF NOT EXISTS idx_images_perceptual_hash ON images(perceptual_hash);
+
+        PRAGMA user_version = 1;
+        COMMIT;",
+    )?;
+
+    set_pragmas(conn)?;
+    Ok(())
+}
+
+/// Migrate schema from an older version
+fn migrate_schema(
+    conn: &PooledConnection<SqliteConnectionManager>,
+    current_version: i32,
+) -> PersistenceResult<()> {
+    // Implement migrations as needed
+    // For now, we don't have any migrations since this is v1
+
+    // Update version
+    conn.execute("PRAGMA user_version = ?1", params![DB_VERSION])?;
+
+    Ok(())
+}
+
+/// Set SQLite performance pragmas
+fn set_pragmas(conn: &PooledConnection<SqliteConnectionManager>) -> PersistenceResult<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA temp_store = MEMORY;
+         PRAGMA mmap_size = 30000000000;",
+    )?;
+
+    Ok(())
+}
+
+/// Get an image by path using a pooled connection
+pub fn get_image_by_path_with_conn(
+    conn: &PooledConnection<SqliteConnectionManager>,
+    path: &Path,
+) -> PersistenceResult<StoredImage> {
+    let path_str = path.to_string_lossy().to_string();
+
+    let image = conn.query_row(
+        "SELECT id, path, size, last_modified, format, created, cryptographic_hash, perceptual_hash
+         FROM images WHERE path = ?1",
+        params![path_str],
+        |row| Ok(row_to_stored_image(row)),
+    )?;
+
+    Ok(image)
+}
+
+/// Save a single processed image using a pooled connection
+pub fn save_processed_image_with_conn(
+    conn: &PooledConnection<SqliteConnectionManager>,
+    image: &ProcessedImage,
+) -> PersistenceResult<()> {
+    let stored_image = StoredImage::new(
+        &image.original,
+        image.cryptographic_hash.as_bytes().to_vec(),
+        image.perceptual_hash.0,
+    );
+
+    // Path string
+    let path_str = stored_image.path.to_string_lossy().to_string();
+
+    // Format string
+    let format_str = match &stored_image.format {
+        ImageFormat::Jpeg => "jpeg",
+        ImageFormat::Png => "png",
+        ImageFormat::Tiff => "tiff",
+        ImageFormat::Heic => "heic",
+        ImageFormat::Other(s) => s,
+    };
+
+    // Check if image already exists by path
+    let exists = conn
+        .query_row(
+            "SELECT 1 FROM images WHERE path = ?1",
+            params![path_str],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    if exists {
+        return Ok(());
+    }
+
+    // Insert the image
+    conn.execute(
+        "INSERT INTO images
+        (path, size, last_modified, format, created, cryptographic_hash, perceptual_hash)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            path_str,
+            stored_image.size,
+            stored_image.last_modified,
+            format_str,
+            stored_image.created,
+            stored_image.cryptographic_hash,
+            stored_image.perceptual_hash.to_string(),
+        ],
+    )?;
+
+    Ok(())
 }
