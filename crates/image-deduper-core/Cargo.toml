@@ -40,7 +40,3 @@ once_cell = "1.19.0"   # For lazy initialization in tests
 
 [features]
 default = []
-
-[[bin]]
-name = "create-test-images"
-path = "tests/discovery/create_test_images.rs"

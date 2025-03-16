@@ -8,6 +8,10 @@ use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::types::{ImageFile, ImageFormat};
 
+/// Test module for discovery functionality
+#[cfg(test)]
+pub mod tests;
+
 /// Discover images in the provided directories
 pub fn discover_images<P: AsRef<Path>>(
     directories: &[P],
@@ -106,10 +110,13 @@ fn get_file_metadata(
 
 /// Returns if the given path has an image extension
 pub fn has_image_extension(path: &Path) -> bool {
-    println!("->> DEBUG: {}", path.display());
-
     match get_image_format(path) {
         Some(format) => format.is_supported(),
         None => false,
     }
+}
+
+/// Check if a path is an image file
+pub fn is_image_path(path: &Path) -> bool {
+    get_image_format(path).is_some()
 }

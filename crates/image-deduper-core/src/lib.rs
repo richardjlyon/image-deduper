@@ -26,6 +26,10 @@ pub mod types;
 pub mod utils;
 // pub mod deduplication;
 
+// Test support module - only included in test builds
+#[cfg(test)]
+pub mod test_support;
+
 pub fn hello() -> &'static str {
     "Hello, world!"
 }

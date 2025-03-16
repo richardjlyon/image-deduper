@@ -61,7 +61,7 @@ impl From<PersistenceError> for crate::Error {
             PersistenceError::Database(e) => {
                 crate::Error::Unknown(format!("Database error: {}", e))
             }
-            PersistenceError::Path(path, msg) => crate::Error::FileNotFound(path),
+            PersistenceError::Path(path, _msg) => crate::Error::FileNotFound(path),
             PersistenceError::NotFound(_) => crate::Error::Unknown("Record not found".to_string()),
             _ => crate::Error::Unknown(format!("Persistence error: {}", err)),
         }

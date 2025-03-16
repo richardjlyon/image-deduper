@@ -1,3 +1,4 @@
+#[allow(clippy::module_inception)]
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -16,7 +17,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let db = create_database_if_not_exists(&db_path).unwrap();
+        let _db = create_database_if_not_exists(&db_path).unwrap();
         assert!(db_path.exists());
     }
 
@@ -78,7 +79,7 @@ mod tests {
         let stored_image = StoredImage::new(&image_file, vec![1, 2, 3, 4, 5], 12345678);
 
         // Add the image to the database
-        let id = add_image(&db_path, &stored_image).unwrap();
+        let _id = add_image(&db_path, &stored_image).unwrap();
 
         // Clear the database
         let count = clear_database(&db_path).unwrap();
@@ -109,7 +110,7 @@ mod tests {
         let stored_image = StoredImage::new(&image_file, vec![1, 2, 3, 4, 5], 12345678);
 
         // Add the image to the database
-        let id = add_image(&db_path, &stored_image).unwrap();
+        let _id = add_image(&db_path, &stored_image).unwrap();
 
         // Remove the image
         let removed = remove_image(&db_path, &image_path).unwrap();

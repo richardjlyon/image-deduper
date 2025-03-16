@@ -8,9 +8,9 @@ mod bench {
 
     // Use a direct function rather than trying to load the module
     fn get_test_image() -> image::DynamicImage {
-        // This implementation is the same as in tests/common/test_images.rs
+        // Update path to use the new location directly in image-deduper-core
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/test_images/jpg/IMG-2624x3636/IMG-2624x3636_original.jpg");
+            .join("test_data/test_images/jpg/IMG-2624x3636/IMG-2624x3636_original.jpg");
         image::open(&path).expect("Failed to open test image")
     }
 

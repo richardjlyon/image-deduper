@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Result as SqliteResult};
+use rusqlite::{params, Connection};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -81,7 +81,7 @@ impl Database {
     }
 
     /// Migrate schema from an older version
-    fn migrate_schema(&self, current_version: i32) -> PersistenceResult<()> {
+    fn migrate_schema(&self, _current_version: i32) -> PersistenceResult<()> {
         // Implement migrations as needed
         // For now, we don't have any migrations since this is v1
 
@@ -148,7 +148,7 @@ impl Database {
     /// ```
     pub fn add_image(&self, image: &StoredImage) -> PersistenceResult<i64> {
         // Check if image already exists by path
-        if let Ok(existing) = self.get_image_by_path(&image.path) {
+        if let Ok(_existing) = self.get_image_by_path(&image.path) {
             return Err(PersistenceError::Duplicate(format!(
                 "Image already exists with path: {}",
                 image.path.display()
