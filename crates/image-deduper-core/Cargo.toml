@@ -8,12 +8,22 @@ repository.workspace = true
 description = "Core library for detecting and managing duplicate images"
 
 [dependencies]
+
+# Error handling
+derive_more = { version = "2.0.1", features = ["from"] }
+anyhow = { workspace = true }
+
 # File handling and traversal
 walkdir.workspace = true
-rayon.workspace = true
-image.workspace = true
+
+# Image processing
 libheif-rs.workspace = true
+image.workspace = true
+
+# Hashing
 blake3.workspace = true
+rustdct = "0.7.1"
+ndarray = "0.16.1"
 
 # Serialization
 serde.workspace = true
@@ -23,27 +33,24 @@ serde_json.workspace = true
 rusqlite = { version = "0.30", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.23"
-num_cpus = "1.16"
 
-# Error handling
-derive_more = { version = "2.0.1", features = ["from"] }
-anyhow = { workspace = true }
-
-# Concurrency
+# Concurrency and async
 crossbeam.workspace = true
+rayon.workspace = true
+num_cpus = "1.16"
 
 # Progress bars
 indicatif = "0.17"
 
+# HTTP client and async runtime (for examples)
+tokio = { version = "1.36", features = ["full"] }
+reqwest = { version = "0.11", features = ["blocking"] }
+
 # Logging
 log.workspace = true
 env_logger.workspace = true
-ndarray = "0.16.1"
-rustdct = "0.7.1"
-
-# HTTP client and async runtime (for examples)
-reqwest = { version = "0.11", features = ["blocking"] }
-tokio = { version = "1.36", features = ["full"] }
+chrono = "0.4.40"
+log4rs = "1.3.0"
 
 [dev-dependencies]
 image.workspace = true

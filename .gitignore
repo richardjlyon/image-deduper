@@ -38,3 +38,11 @@ build/
 *.db-lock
 *.db-shm
 *.db-trace
+
+# Logs
+*.log
+*.log.*
+*.log.*.*
+*.log.*.*.*
+*.log.*.*.*.*
+*.log.*.*.*.*.*

@@ -6,29 +6,36 @@
 //! - Duplicate detection algorithms
 //! - Safe file operations
 
+// -- External Dependencies --
+use indicatif::{ProgressBar, ProgressStyle};
+use log::{debug, error, info, trace, warn};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rayon::prelude::*;
+
+// -- Standard Library --
 use std::{path::Path, sync::Arc};
 
+// -- Internal Modules --
 mod error;
 
-// -- Flatten
+// -- Public Re-exports --
 pub use config::*;
 pub use error::{Error, Result};
-use indicatif::{ProgressBar, ProgressStyle};
-use log::info;
 pub use types::*;
 
 // -- Public Modules --
 pub mod action;
 pub mod config;
 pub mod discovery;
+pub mod logging;
 pub mod persistence;
 pub mod processing;
 pub mod safety;
 pub mod types;
 // pub mod deduplication;
+
+// -- Test Modules --
 #[cfg(test)]
 pub mod test_utils;
 
@@ -48,6 +55,31 @@ impl ImageDeduper {
         }
     }
 
+    /// Run the full deduplication pipeline
+    pub fn run(&self, directories: &[impl AsRef<Path>], force_rescan: bool) -> Result<()> {
+        // Discover images
+        info!("Discovering images...");
+        let images = self.discover_images(directories)?;
+        info!("Found {} images", images.len());
+
+        // Process and persist images
+        info!("Processing images...");
+        let processed_images = self.process_images(images, force_rescan)?;
+        info!("Processed {} images", processed_images.len());
+
+        // // Find duplicates
+        // let duplicate_groups = self.find_duplicates(processed_images)?;
+
+        // Take action
+        // if self.config.dry_run {
+        //     self.preview_actions(&duplicate_groups)
+        // } else {
+        //     self.execute_deduplication(&duplicate_groups)
+        // }
+
+        Ok(())
+    }
+
     /// Discover all images in the provided directories
     pub fn discover_images(
         &self,
@@ -57,12 +89,16 @@ impl ImageDeduper {
     }
 
     /// Process images to generate hashes and extract metadata
-    pub fn process_images(
+    fn process_images(
         &self,
         images: Vec<types::ImageFile>,
         force_rescan: bool,
     ) -> Result<Vec<types::ProcessedImage>> {
         let total_images = images.len();
+        info!(
+            "Starting processing of {} images, force_rescan={}",
+            total_images, force_rescan
+        );
 
         // Set up progress bar
         let progress = ProgressBar::new(total_images as u64);
@@ -87,19 +123,42 @@ impl ImageDeduper {
         } else {
             std::path::PathBuf::from("image_deduper.db")
         };
+        debug!("Using database path: {}", db_path.display());
 
         // Create a connection pool
         let manager = SqliteConnectionManager::file(&db_path);
-        let pool = Pool::builder()
+        let pool = match Pool::builder()
             .max_size(num_cpus::get() as u32) // One connection per CPU core
             .build(manager)
-            .map_err(|e| Error::Unknown(format!("Failed to create connection pool: {}", e)))?;
+        {
+            Ok(pool) => pool,
+            Err(e) => {
+                // Use our logger helper for db file operation
+                logging::log_file_error(&db_path, "create_connection_pool", &e);
+                return Err(Error::Unknown(format!(
+                    "Failed to create connection pool: {}",
+                    e
+                )));
+            }
+        };
 
         // Initialize the database schema
-        let conn = pool
-            .get()
-            .map_err(|e| Error::Unknown(format!("Failed to get database connection: {}", e)))?;
-        persistence::initialize_database(&conn)?;
+        let conn = match pool.get() {
+            Ok(conn) => conn,
+            Err(e) => {
+                error!("Failed to get database connection: {}", e);
+                return Err(Error::Unknown(format!(
+                    "Failed to get database connection: {}",
+                    e
+                )));
+            }
+        };
+
+        if let Err(e) = persistence::initialize_database(&conn) {
+            error!("Failed to initialize database: {}", e);
+            return Err(e.into());
+        }
+        debug!("Database initialized successfully");
 
         // Process images in chunks to manage memory usage
         let chunk_size = 1000;
@@ -107,7 +166,9 @@ impl ImageDeduper {
         let mut failed_images = Vec::new();
 
         for (chunk_index, chunk) in images.chunks(chunk_size).enumerate() {
-            progress.set_message(format!("Processing chunk {}", chunk_index + 1));
+            let chunk_message = format!("Processing chunk {}", chunk_index + 1);
+            progress.set_message(chunk_message.clone());
+            debug!("{} ({} images)", chunk_message, chunk.len());
 
             let chunk_results: Vec<_> = chunk
                 .par_iter()
@@ -121,6 +182,11 @@ impl ImageDeduper {
                             Ok(conn) => conn,
                             Err(e) => {
                                 progress.inc(1);
+                                error!(
+                                    "Failed to get database connection while processing {}: {}",
+                                    img.path.display(),
+                                    e
+                                );
                                 return Err(Error::Unknown(format!(
                                     "Failed to get database connection: {}",
                                     e
@@ -131,12 +197,24 @@ impl ImageDeduper {
                         // Try to get from database first
                         match persistence::get_image_by_path_with_conn(&conn, &img.path) {
                             Ok(stored_image) => {
+                                trace!(
+                                    "Found image {} in database, using cached data",
+                                    img.path.display()
+                                );
+
                                 // Convert Vec<u8> to [u8; 32] for Blake3 hash
                                 let chash: [u8; 32] =
                                     match stored_image.cryptographic_hash.try_into() {
                                         Ok(hash) => hash,
                                         Err(_) => {
                                             progress.inc(1);
+                                            logging::log_hash_error(
+                                                &img.path,
+                                                &std::io::Error::new(
+                                                    std::io::ErrorKind::InvalidData,
+                                                    "Invalid cryptographic hash length",
+                                                ),
+                                            );
                                             return Err(Error::Unknown(format!(
                                                 "Invalid cryptographic hash length for {}",
                                                 img.path.display()
@@ -152,16 +230,17 @@ impl ImageDeduper {
                                     ),
                                 })
                             }
-                            Err(_) => {
+                            Err(e) => {
+                                debug!(
+                                    "Image {} not found in database: {}, computing hashes",
+                                    img.path.display(),
+                                    e
+                                );
                                 // Not in database, process it
                                 match Self::process_single_image(img, &conn) {
                                     Ok(processed_image) => Ok(processed_image),
                                     Err(e) => {
-                                        info!(
-                                            "Failed to process image {}: {}",
-                                            img.path.display(),
-                                            e
-                                        );
+                                        logging::log_file_error(&img.path, "process_image", &e);
                                         Err(e)
                                     }
                                 }
@@ -169,10 +248,16 @@ impl ImageDeduper {
                         }
                     } else {
                         // Force rescan, always process
+                        debug!("Force rescanning image {}", img.path.display());
                         let conn = match pool.get() {
                             Ok(conn) => conn,
                             Err(e) => {
                                 progress.inc(1);
+                                error!(
+                                    "Failed to get database connection for {}: {}",
+                                    img.path.display(),
+                                    e
+                                );
                                 return Err(Error::Unknown(format!(
                                     "Failed to get database connection: {}",
                                     e
@@ -183,7 +268,7 @@ impl ImageDeduper {
                         match Self::process_single_image(img, &conn) {
                             Ok(processed_image) => Ok(processed_image),
                             Err(e) => {
-                                info!("Failed to process image {}: {}", img.path.display(), e);
+                                logging::log_file_error(&img.path, "process_image", &e);
                                 Err(e)
                             }
                         }
@@ -203,17 +288,19 @@ impl ImageDeduper {
             }
         }
 
-        progress.finish_with_message(format!(
+        let completion_message = format!(
             "Processing complete - {} succeeded, {} failed",
             processed.len(),
             failed_images.len()
-        ));
+        );
+        progress.finish_with_message(completion_message.clone());
+        info!("{}", completion_message);
 
         // Log failed images
         if !failed_images.is_empty() {
-            info!("Failed to process {} images:", failed_images.len());
-            for (path, error) in failed_images {
-                info!("  {}: {}", path.display(), error);
+            warn!("Failed to process {} images:", failed_images.len());
+            for (path, error) in &failed_images {
+                logging::log_file_error(path, "process_image", error);
             }
         }
 
@@ -246,49 +333,5 @@ impl ImageDeduper {
         }
 
         Ok(processed_image)
-    }
-
-    // /// Find duplicate images among the processed images
-    // pub fn find_duplicates(&self, images: Vec<types::ProcessedImage>) -> Result<Vec<types::DuplicateGroup>, Error> {
-    //     deduplication::find_duplicates(images, &self.config)
-    // }
-
-    // /// Print a preview of actions without making changes
-    // pub fn preview_actions(&self, duplicate_groups: &[types::DuplicateGroup]) -> Result<(), Error> {
-    //     action::preview_actions(duplicate_groups, &self.config)
-    // }
-
-    // /// Execute deduplication actions based on configuration
-    // pub fn execute_deduplication(&self, duplicate_groups: &[types::DuplicateGroup]) -> Result<(), Error> {
-    //     action::execute_deduplication(duplicate_groups, &self.safety_manager, &self.config)
-    // }
-
-    /// Run the full deduplication pipeline
-    pub fn run(&self, directories: &[impl AsRef<Path>], force_rescan: bool) -> Result<()> {
-        // Discover images
-        info!("Discovering images...");
-        let images = self.discover_images(directories)?;
-        info!("Found {} images", images.len());
-
-        // Process and persist images
-        info!("Processing images...");
-        let processed_images = self.process_images(images, force_rescan)?;
-        info!("Processed {} images", processed_images.len());
-
-        for img in processed_images {
-            println!("{:?}", img.perceptual_hash);
-        }
-
-        // // Find duplicates
-        // let duplicate_groups = self.find_duplicates(processed_images)?;
-
-        // Take action
-        // if self.config.dry_run {
-        //     self.preview_actions(&duplicate_groups)
-        // } else {
-        //     self.execute_deduplication(&duplicate_groups)
-        // }
-
-        Ok(())
     }
 }
