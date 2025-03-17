@@ -2,7 +2,6 @@ use log::{error, info, LevelFilter};
 use std::path::Path;
 
 // For file-based logging with rotation
-use log4rs::append::console::ConsoleAppender;
 use log4rs::append::rolling_file::policy::compound::roll::fixed_window::FixedWindowRoller;
 use log4rs::append::rolling_file::policy::compound::trigger::size::SizeTrigger;
 use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
@@ -42,9 +41,7 @@ pub fn init_logger(log_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::builder()
         .appender(Appender::builder().build("file", Box::new(rolling_file)))
         .build(
-            Root::builder()
-                .appender("file")
-                .build(LevelFilter::Info), // Default log level
+            Root::builder().appender("file").build(LevelFilter::Info), // Default log level
         )
         .map_err(|e| format!("Failed to build log config: {}", e))?;
 

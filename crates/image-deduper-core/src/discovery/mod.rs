@@ -54,7 +54,17 @@ pub fn discover_images_in_directory(directory: &Path, config: &Config) -> Result
         .max_depth(max_depth)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
+        .filter(|e| {
+            // Check if the current path (file or directory) is in an excluded directory
+            let current_path = e.path();
+            let is_excluded = config
+                .excluded_directories
+                .iter()
+                .any(|excluded| current_path.starts_with(excluded));
+
+            // Keep entry only if it's not excluded and is a file
+            !is_excluded && e.file_type().is_file()
+        })
     {
         let path = entry.path();
 

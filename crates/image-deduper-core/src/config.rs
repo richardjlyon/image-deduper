@@ -79,6 +79,9 @@ pub struct Config {
 
     /// Log level
     pub log_level: LogLevel,
+
+    /// Directories to exclude from image scanning
+    pub excluded_directories: Vec<PathBuf>,
 }
 
 impl Default for Config {
@@ -103,6 +106,7 @@ impl Default for Config {
             database_path: Some(PathBuf::from("image-deduper.db")),
             batch_size: Some(100),
             log_level: LogLevel::Info,
+            excluded_directories: Vec::new(),
         }
     }
 }
