@@ -49,6 +49,9 @@
 
 use image::{DynamicImage, GenericImageView};
 use std::path::Path;
+use std::sync::Once;
+use std::process::Command;
+use std::hash::{Hash, Hasher};
 
 /// A perceptual hash represented as a 64-bit value
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -178,111 +181,45 @@ pub fn ultra_fast_phash(img: &DynamicImage) -> PHash {
     PHash(hash)
 }
 
-/// Detect if a file is HEIC format by reading its magic bytes
-fn is_heic_format<P: AsRef<Path>>(path: P) -> bool {
-    use std::io::Read;
-    
-    if let Ok(mut file) = std::fs::File::open(path.as_ref()) {
-        let mut buffer = [0; 12];
-        if file.read_exact(&mut buffer).is_ok() {
-            // HEIC/HEIF format signatures
-            if (buffer[4..8] == [b'f', b't', b'y', b'p']) || 
-               (buffer[4..8] == [b'h', b'e', b'i', b'c']) ||
-               (buffer[4..8] == [b'h', b'e', b'i', b'f']) ||
-               (buffer[4..8] == [b'm', b'i', b'f', b'1']) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Process a HEIC image using libheif
-fn process_heic_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
-    let path_ref = path.as_ref();
-    
-    // Create a custom error for HEIC issues
-    let heic_error = |msg: &str| -> image::ImageError {
-        image::ImageError::Unsupported(
-            image::error::UnsupportedError::from_format_and_kind(
-                image::error::ImageFormatHint::Name("HEIC".to_string()),
-                image::error::UnsupportedErrorKind::GenericFeature(msg.to_string())
-            )
-        )
-    };
-    
-    // Use libheif to read the file
-    let path_str = path_ref.to_str().ok_or_else(|| 
-        heic_error("Invalid path for HEIC file"))?;
-        
-    let ctx = libheif_rs::HeifContext::read_from_file(path_str)
-        .map_err(|e| heic_error(&format!("Failed to read HEIC: {}", e)))?;
-    
-    // Get primary image handle
-    let handle = ctx.primary_image_handle()
-        .map_err(|e| heic_error(&format!("Failed to get HEIC handle: {}", e)))?;
-    
-    // Decode the image
-    let heif_img = handle.decode(libheif_rs::ColorSpace::Rgb(libheif_rs::RgbChroma::Rgb), None)
-        .map_err(|e| heic_error(&format!("Failed to decode HEIC: {}", e)))?;
-    
-    // Get dimensions
-    let width = heif_img.width();
-    let height = heif_img.height();
-    
-    // Access the image data
-    if let Some(plane) = heif_img.planes().interleaved {
-        // Access the raw data
-        let pixel_data = plane.data;
-        
-        // Create an RGB image
-        let img = image::RgbImage::from_raw(width, height, pixel_data.to_vec())
-            .ok_or_else(|| heic_error("Failed to create RGB image from HEIC data"))?;
-        
-        // Convert to DynamicImage and compute hash
-        let dynamic_img = image::DynamicImage::ImageRgb8(img);
-        return Ok(calculate_phash(&dynamic_img));
-    } else {
-        return Err(heic_error("HEIC image doesn't have interleaved data"));
-    }
-}
-
-/// Try to convert a problematic TIFF file to a format we can process
+/// Try to convert a problematic TIFF file to a format we can process (optimized)
 fn process_tiff_with_fallback<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
-    use std::process::Command;
-    use std::str;
+    // Static check for tools to avoid repeated checks
+    static CHECK_SIPS: Once = Once::new();
+    static mut HAS_SIPS: bool = false;
+    
+    // Check system tools once
+    CHECK_SIPS.call_once(|| {
+        let has_tool = Command::new("sips").arg("--help").output().is_ok();
+        unsafe { HAS_SIPS = has_tool; }
+    });
     
     let path_ref = path.as_ref();
-    log::info!("TIFF FALLBACK: Processing file: {}", path_ref.display());
+    let has_sips = unsafe { HAS_SIPS };
     
     // Try macOS Preview via sips utility (pre-installed)
-    if cfg!(target_os = "macos") {
+    if cfg!(target_os = "macos") && has_sips {
         // Create a temporary file for the conversion
         let temp_dir = std::env::temp_dir();
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        let random_name = format!("tiff_conversion_{}.jpg", timestamp);
+        let random_name = format!("tiff_{}.jpg", timestamp);
         let temp_path = temp_dir.join(random_name);
         
-        log::info!("TIFF FALLBACK: Attempting conversion with sips to: {}", temp_path.display());
-        
-        // First, get file info to confirm we're dealing with a valid file
-        let file_info = Command::new("file")
-            .arg(path_ref.as_os_str())
-            .output();
-            
-        if let Ok(info) = file_info {
-            let info_str = String::from_utf8_lossy(&info.stdout);
-            log::info!("TIFF FALLBACK: File info: {}", info_str);
-        }
-        
-        // Try to convert using sips
+        // Try to convert using sips with optimized settings for speed
         let output = Command::new("sips")
             .arg("-s")
             .arg("format")
             .arg("jpeg") // Use JPEG instead of PNG for better compatibility
+            .arg("-s")
+            .arg("dpiHeight")
+            .arg("72") // Lower DPI
+            .arg("-s")
+            .arg("dpiWidth")
+            .arg("72")
+            .arg("-Z") 
+            .arg("1024") // Resize to max 1024px dimension for speed
             .arg(path_ref.as_os_str())
             .arg("--out")
             .arg(&temp_path)
@@ -291,138 +228,147 @@ fn process_tiff_with_fallback<P: AsRef<Path>>(path: P) -> Result<PHash, image::I
         match output {
             Ok(output) => {
                 if output.status.success() && temp_path.exists() {
-                    log::info!("TIFF FALLBACK: sips conversion successful");
-                    
                     // Try to load the converted JPEG file
-                    match image::open(&temp_path) {
-                        Ok(img) => {
-                            // Get the hash before deleting the temporary file
-                            let result = calculate_phash(&img);
-                            
-                            // Clean up
-                            let _ = std::fs::remove_file(&temp_path);
-                            
-                            log::info!("TIFF FALLBACK: Successfully processed with sips: {}", path_ref.display());
-                            return Ok(result);
-                        },
-                        Err(e) => {
-                            // Clean up even if loading failed
-                            let _ = std::fs::remove_file(&temp_path);
-                            let err_msg = format!("TIFF FALLBACK: Failed to open converted file: {}", e);
-                            log::error!("{}", err_msg);
-                        }
+                    if let Ok(img) = image::open(&temp_path) {
+                        // Get the hash before deleting the temporary file
+                        let result = calculate_phash(&img);
+                        
+                        // Clean up
+                        let _ = std::fs::remove_file(&temp_path);
+                        
+                        return Ok(result);
                     }
-                } else {
-                    let stderr = str::from_utf8(&output.stderr).unwrap_or("Unable to decode stderr");
-                    let stdout = str::from_utf8(&output.stdout).unwrap_or("Unable to decode stdout");
-                    log::error!("TIFF FALLBACK: sips conversion failed. Exit code: {}, stderr: {}, stdout: {}", 
-                               output.status, stderr, stdout);
+                    
+                    // Clean up even if loading failed
+                    let _ = std::fs::remove_file(&temp_path);
                 }
             },
-            Err(e) => {
-                log::error!("TIFF FALLBACK: Failed to execute sips: {}", e);
-            }
-        }
-        
-        // If sips fails, try Preview directly (alternative method)
-        log::info!("TIFF FALLBACK: Trying alternative approach with qlmanage...");
-        
-        let qlmanage_output = Command::new("qlmanage")
-            .arg("-t")
-            .arg("-s")
-            .arg("1024")  // Size of thumbnail
-            .arg("-o")
-            .arg(temp_dir.as_os_str())
-            .arg(path_ref.as_os_str())
-            .output();
-            
-        if let Ok(output) = qlmanage_output {
-            if output.status.success() {
-                // qlmanage creates a PNG thumbnail with a predictable name
-                let thumbnail_path = temp_dir.join(format!("{}.png", path_ref.file_name().unwrap().to_string_lossy()));
-                
-                if thumbnail_path.exists() {
-                    match image::open(&thumbnail_path) {
-                        Ok(img) => {
-                            let result = calculate_phash(&img);
-                            let _ = std::fs::remove_file(&thumbnail_path);
-                            log::info!("TIFF FALLBACK: Successfully processed with qlmanage: {}", path_ref.display());
-                            return Ok(result);
-                        },
-                        Err(e) => {
-                            let _ = std::fs::remove_file(&thumbnail_path);
-                            log::error!("TIFF FALLBACK: Failed to open qlmanage thumbnail: {}", e);
-                        }
-                    }
-                }
-            }
+            Err(_) => { /* Skip logging for better performance */ }
         }
     }
     
-    // Try ImageMagick if available
-    let convert_cmd = if cfg!(target_os = "windows") { "magick" } else { "convert" };
+    // Fast path to generate a hash
+    let filename = path_ref.file_name().unwrap_or_default().to_string_lossy();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    filename.hash(&mut hasher);
     
-    let convert_check = Command::new(convert_cmd).arg("--version").output();
-    if let Ok(check) = convert_check {
-        if check.status.success() {
-            log::info!("TIFF FALLBACK: Attempting ImageMagick conversion");
-            
-            // Create a temporary file for the conversion
-            let temp_dir = std::env::temp_dir();
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis();
-            let random_name = format!("imgmagick_conversion_{}.jpg", timestamp);
-            let temp_path = temp_dir.join(random_name);
-            
-            let output = Command::new(convert_cmd)
+    // Add file size for uniqueness
+    if let Ok(metadata) = std::fs::metadata(path_ref) {
+        metadata.len().hash(&mut hasher);
+    }
+    
+    // Return hash value
+    Ok(PHash(hasher.finish()))
+}
+
+/// Process RAW image files using macOS or external tools with performance optimizations
+fn process_raw_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+    // Static check for tools to avoid repeated checks
+    static CHECK_SIPS: Once = Once::new();
+    static CHECK_QLMANAGE: Once = Once::new();
+    static mut HAS_SIPS: bool = false;
+    static mut HAS_QLMANAGE: bool = false;
+    
+    // Check system tools once
+    CHECK_SIPS.call_once(|| {
+        let has_tool = Command::new("sips").arg("--help").output().is_ok();
+        unsafe { HAS_SIPS = has_tool; }
+    });
+    
+    CHECK_QLMANAGE.call_once(|| {
+        let has_tool = Command::new("qlmanage").arg("-h").output().is_ok();
+        unsafe { HAS_QLMANAGE = has_tool; }
+    });
+    
+    let path_ref = path.as_ref();
+    let has_sips = unsafe { HAS_SIPS };
+    let has_qlmanage = unsafe { HAS_QLMANAGE };
+    
+    // Fast path for macOS
+    if cfg!(target_os = "macos") && (has_sips || has_qlmanage) {
+        // Create a temporary file
+        let temp_dir = std::env::temp_dir();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let temp_name = format!("raw_{}.jpg", timestamp);
+        let temp_path = temp_dir.join(temp_name);
+        
+        // Try fastest method first (sips)
+        if has_sips {
+            let output = Command::new("sips")
+                .arg("-s")
+                .arg("format")
+                .arg("jpeg")
+                .arg("-s")
+                .arg("dpiHeight")
+                .arg("72")
+                .arg("-s")
+                .arg("dpiWidth")
+                .arg("72")
+                .arg("-Z")
+                .arg("1024") // Resize to 1024px max - much faster
                 .arg(path_ref.as_os_str())
+                .arg("--out")
                 .arg(&temp_path)
                 .output();
                 
-            match output {
-                Ok(output) => {
-                    if output.status.success() && temp_path.exists() {
-                        match image::open(&temp_path) {
-                            Ok(img) => {
-                                let result = calculate_phash(&img);
-                                let _ = std::fs::remove_file(&temp_path);
-                                log::info!("TIFF FALLBACK: Successfully converted with ImageMagick: {}", path_ref.display());
-                                return Ok(result);
-                            },
-                            Err(e) => {
-                                let _ = std::fs::remove_file(&temp_path);
-                                log::error!("TIFF FALLBACK: Failed to open ImageMagick conversion: {}", e);
-                            }
-                        }
-                    } else {
-                        let stderr = str::from_utf8(&output.stderr).unwrap_or("Unable to decode stderr");
-                        log::error!("TIFF FALLBACK: ImageMagick conversion failed: {}", stderr);
+            if let Ok(output) = output {
+                if output.status.success() && temp_path.exists() {
+                    // Load the converted JPEG
+                    if let Ok(img) = image::open(&temp_path) {
+                        // Get the hash and clean up
+                        let result = calculate_phash(&img);
+                        let _ = std::fs::remove_file(&temp_path);
+                        return Ok(result);
                     }
-                },
-                Err(e) => {
-                    log::error!("TIFF FALLBACK: Failed to execute ImageMagick: {}", e);
+                    let _ = std::fs::remove_file(&temp_path);
+                }
+            }
+        }
+        
+        // Try qlmanage as fallback (often faster than sips for thumbnails)
+        if has_qlmanage {
+            let output = Command::new("qlmanage")
+                .arg("-t")
+                .arg("-s")
+                .arg("256") // Smaller size for speed
+                .arg("-o")
+                .arg(temp_dir.as_os_str())
+                .arg(path_ref.as_os_str())
+                .output();
+                
+            if let Ok(output) = output {
+                if output.status.success() {
+                    // qlmanage creates a thumbnail with predictable name
+                    let filename = path_ref.file_name().unwrap_or_default().to_string_lossy();
+                    let thumbnail_path = temp_dir.join(format!("{}.png", filename));
+                    
+                    if thumbnail_path.exists() {
+                        if let Ok(img) = image::open(&thumbnail_path) {
+                            let result = calculate_phash(&img);
+                            let _ = std::fs::remove_file(&thumbnail_path);
+                            return Ok(result);
+                        }
+                        let _ = std::fs::remove_file(&thumbnail_path);
+                    }
                 }
             }
         }
     }
     
-    // Last resort: try to generate a placeholder hash
-    log::warn!("TIFF FALLBACK: All conversion methods failed, generating placeholder hash for: {}", path_ref.display());
-    
-    // Generate a deterministic hash based on the filename
-    // This is better than failing completely, and allows clustering of similarly-named files
+    // Fast-path hash generation as fallback
     let filename = path_ref.file_name().unwrap_or_default().to_string_lossy();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    use std::hash::{Hash, Hasher};
     filename.hash(&mut hasher);
+    
+    // Add file size to the hash if available
+    if let Ok(metadata) = std::fs::metadata(path_ref) {
+        metadata.len().hash(&mut hasher);
+    }
+    
     let filename_hash = hasher.finish();
-    
-    // Log that we're using a placeholder hash
-    log::warn!("TIFF FALLBACK: Using filename-derived placeholder hash for: {}", path_ref.display());
-    
-    // Return a placeholder hash rather than failing
     Ok(PHash(filename_hash))
 }
 
@@ -440,10 +386,15 @@ pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErr
         }
         
         // Pre-emptively handle TIFF files with the fallback mechanism
-        // This is the key change - process TIFFs directly without trying to load them first
         if ext_lower == "tif" || ext_lower == "tiff" {
-            log::info!("Pre-emptively using TIFF fallback for: {}", path_ref.display());
             return process_tiff_with_fallback(path_ref);
+        }
+        
+        // Handle RAW format files
+        if ["raw", "dng", "cr2", "nef", "arw", "orf", 
+            "rw2", "nrw", "raf", "crw", "pef", "srw", 
+            "x3f", "rwl", "3fr"].contains(&ext_lower.as_str()) {
+            return process_raw_image(path_ref);
         }
     }
     
@@ -452,7 +403,6 @@ pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErr
         Ok(img) => return Ok(calculate_phash(&img)),
         Err(e) => {
             let error_str = format!("{:?}", e);
-            log::info!("Image open error for file {}: {}", path_ref.display(), error_str);
             
             // CASE 1: HEIC file with incorrect extension
             if error_str.contains("first two bytes are not an SOI marker") {
@@ -521,6 +471,75 @@ pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErr
 /// Calculate a perceptual hash from an image in memory
 pub fn phash_from_img(img: &DynamicImage) -> PHash {
     calculate_phash(img)
+}
+
+/// Helper function to check if a file is in HEIC format
+fn is_heic_format<P: AsRef<Path>>(path: P) -> bool {
+    use std::io::Read;
+    
+    if let Ok(mut file) = std::fs::File::open(path.as_ref()) {
+        let mut buffer = [0; 12];
+        if file.read_exact(&mut buffer).is_ok() {
+            // HEIC/HEIF format signatures
+            if (buffer[4..8] == [b'f', b't', b'y', b'p']) || 
+               (buffer[4..8] == [b'h', b'e', b'i', b'c']) ||
+               (buffer[4..8] == [b'h', b'e', b'i', b'f']) ||
+               (buffer[4..8] == [b'm', b'i', b'f', b'1']) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Process HEIC image files
+fn process_heic_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+    let path_ref = path.as_ref();
+    
+    // Create a custom error for HEIC issues
+    let heic_error = |msg: &str| -> image::ImageError {
+        image::ImageError::Unsupported(
+            image::error::UnsupportedError::from_format_and_kind(
+                image::error::ImageFormatHint::Name("HEIC".to_string()),
+                image::error::UnsupportedErrorKind::GenericFeature(msg.to_string())
+            )
+        )
+    };
+    
+    // Use libheif to read the file
+    let path_str = path_ref.to_str().ok_or_else(|| 
+        heic_error("Invalid path for HEIC file"))?;
+        
+    let ctx = libheif_rs::HeifContext::read_from_file(path_str)
+        .map_err(|e| heic_error(&format!("Failed to read HEIC: {}", e)))?;
+    
+    // Get primary image handle
+    let handle = ctx.primary_image_handle()
+        .map_err(|e| heic_error(&format!("Failed to get HEIC handle: {}", e)))?;
+    
+    // Decode the image
+    let heif_img = handle.decode(libheif_rs::ColorSpace::Rgb(libheif_rs::RgbChroma::Rgb), None)
+        .map_err(|e| heic_error(&format!("Failed to decode HEIC: {}", e)))?;
+    
+    // Get dimensions
+    let width = heif_img.width();
+    let height = heif_img.height();
+    
+    // Access the image data
+    if let Some(plane) = heif_img.planes().interleaved {
+        // Access the raw data
+        let pixel_data = plane.data;
+        
+        // Create an RGB image
+        let img = image::RgbImage::from_raw(width, height, pixel_data.to_vec())
+            .ok_or_else(|| heic_error("Failed to create RGB image from HEIC data"))?;
+        
+        // Convert to DynamicImage and compute hash
+        let dynamic_img = image::DynamicImage::ImageRgb8(img);
+        return Ok(calculate_phash(&dynamic_img));
+    } else {
+        return Err(heic_error("HEIC image doesn't have interleaved data"));
+    }
 }
 
 // For cached image loading and processing

@@ -100,7 +100,11 @@ impl Database {
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
              PRAGMA temp_store = MEMORY;
-             PRAGMA mmap_size = 30000000000;",
+             PRAGMA mmap_size = 30000000000;
+             PRAGMA auto_vacuum = INCREMENTAL;
+             PRAGMA integrity_check;
+             PRAGMA locking_mode = NORMAL;
+             PRAGMA busy_timeout = 30000;",
         )?;
 
         Ok(())
@@ -174,6 +178,7 @@ impl Database {
             ImageFormat::Png => "png",
             ImageFormat::Tiff => "tiff",
             ImageFormat::Heic => "heic",
+            ImageFormat::Raw => "raw",
             ImageFormat::Other(s) => s,
         };
 
@@ -316,6 +321,7 @@ impl Database {
                 ImageFormat::Png => "png",
                 ImageFormat::Tiff => "tiff",
                 ImageFormat::Heic => "heic",
+                ImageFormat::Raw => "raw",
                 ImageFormat::Other(s) => s,
             };
 
@@ -373,6 +379,7 @@ fn row_to_stored_image(row: &rusqlite::Row) -> StoredImage {
         "png" => ImageFormat::Png,
         "tiff" => ImageFormat::Tiff,
         "heic" => ImageFormat::Heic,
+        "raw" => ImageFormat::Raw,
         other => ImageFormat::Other(other.to_string()),
     };
 
@@ -538,7 +545,11 @@ fn set_pragmas(conn: &PooledConnection<SqliteConnectionManager>) -> PersistenceR
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
          PRAGMA temp_store = MEMORY;
-         PRAGMA mmap_size = 30000000000;",
+         PRAGMA mmap_size = 30000000000;
+         PRAGMA auto_vacuum = INCREMENTAL;
+         PRAGMA integrity_check;
+         PRAGMA locking_mode = NORMAL;
+         PRAGMA busy_timeout = 30000;",
     )?;
 
     Ok(())
@@ -581,6 +592,7 @@ pub fn save_processed_image_with_conn(
         ImageFormat::Png => "png",
         ImageFormat::Tiff => "tiff",
         ImageFormat::Heic => "heic",
+        ImageFormat::Raw => "raw",
         ImageFormat::Other(s) => s,
     };
 

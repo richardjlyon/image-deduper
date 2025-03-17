@@ -38,6 +38,7 @@ r2d2_sqlite = "0.23"
 crossbeam.workspace = true
 rayon.workspace = true
 num_cpus = "1.16"
+ctrlc = "3.4.1"
 
 # Progress bars
 indicatif = "0.17"

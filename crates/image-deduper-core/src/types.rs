@@ -13,6 +13,7 @@ pub enum ImageFormat {
     Png,
     Tiff,
     Heic,
+    Raw,  // Added RAW format
     Other(String),
 }
 
@@ -24,6 +25,10 @@ impl ImageFormat {
             "png" => Self::Png,
             "tif" | "tiff" => Self::Tiff,
             "heic" => Self::Heic,
+            // RAW format extensions
+            "raw" | "dng" | "cr2" | "nef" | "arw" | "orf" |
+            "rw2" | "nrw" | "raf" | "crw" | "pef" | "srw" |
+            "x3f" | "rwl" | "3fr" => Self::Raw,
             other => Self::Other(other.to_string()),
         }
     }
@@ -32,6 +37,7 @@ impl ImageFormat {
     pub fn is_supported(&self) -> bool {
         match self {
             Self::Jpeg | Self::Png | Self::Tiff | Self::Heic => true,
+            Self::Raw => true,  // Mark RAW as supported
             Self::Other(_) => false,
         }
     }
