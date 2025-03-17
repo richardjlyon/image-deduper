@@ -521,7 +521,7 @@ pub fn initialize_database(
 /// Migrate schema from an older version
 fn migrate_schema(
     conn: &PooledConnection<SqliteConnectionManager>,
-    current_version: i32,
+    _current_version: i32,
 ) -> PersistenceResult<()> {
     // Implement migrations as needed
     // For now, we don't have any migrations since this is v1

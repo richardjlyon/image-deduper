@@ -1,9 +1,8 @@
 use anyhow::Result;
-use image::{ImageBuffer, ImageFormat};
 use log::{error, info};
 use reqwest::blocking;
 use std::fs::{self, create_dir_all};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const TEST_DATA_DIR: &str = "crates/image-deduper-core/examples/test_data";
 const BLUR_AMOUNT: f32 = 3.0;
