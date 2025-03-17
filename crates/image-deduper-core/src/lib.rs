@@ -125,10 +125,18 @@ impl ImageDeduper {
         };
         debug!("Using database path: {}", db_path.display());
 
-        // Create a connection pool
+        // Create a connection pool with better timeout handling
         let manager = SqliteConnectionManager::file(&db_path);
+        
+        // Calculate reasonable thread count - this prevents connection timeouts
+        // Use fewer connections than CPUs to avoid database contention
+        let max_connections = std::cmp::max(4, num_cpus::get() as u32 / 2);
+        
+        // Configure pool with timeouts and retry settings
         let pool = match Pool::builder()
-            .max_size(num_cpus::get() as u32) // One connection per CPU core
+            .max_size(max_connections)
+            .min_idle(Some(2)) // Keep at least some connections ready
+            .connection_timeout(std::time::Duration::from_secs(5)) // Shorter connection timeout
             .build(manager)
         {
             Ok(pool) => pool,
@@ -141,6 +149,8 @@ impl ImageDeduper {
                 )));
             }
         };
+        
+        info!("Database connection pool created with {} max connections", max_connections);
 
         // Initialize the database schema
         let conn = match pool.get() {
@@ -177,20 +187,38 @@ impl ImageDeduper {
                     let pool = Arc::new(pool.clone());
 
                     let result = if !force_rescan {
-                        // Get a connection from the pool
+                        // Get a connection from the pool with retry logic
                         let conn = match pool.get() {
                             Ok(conn) => conn,
                             Err(e) => {
-                                progress.inc(1);
-                                error!(
-                                    "Failed to get database connection while processing {}: {}",
-                                    img.path.display(),
-                                    e
+                                // First failure - log warning and retry after a short delay
+                                warn!(
+                                    "Database connection timeout while processing {}, retrying...",
+                                    img.path.display()
                                 );
-                                return Err(Error::Unknown(format!(
-                                    "Failed to get database connection: {}",
-                                    e
-                                )));
+                                
+                                // Short delay before retry
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                                
+                                // Retry once
+                                match pool.get() {
+                                    Ok(conn) => conn,
+                                    Err(e) => {
+                                        // Second failure - log error and skip this file
+                                        progress.inc(1);
+                                        error!(
+                                            "Failed to get database connection while processing {}: {}",
+                                            img.path.display(),
+                                            e
+                                        );
+                                        
+                                        // Instead of failing, skip this file with a warning and continue
+                                        warn!("Skipping database lookup for {}, continuing with direct processing", img.path.display());
+                                        
+                                        // Process the file directly instead of database lookup
+                                        return Self::process_image_without_db(img);
+                                    }
+                                }
                             }
                         };
 
@@ -249,19 +277,35 @@ impl ImageDeduper {
                     } else {
                         // Force rescan, always process
                         debug!("Force rescanning image {}", img.path.display());
+                        
+                        // Get a connection with retry logic
                         let conn = match pool.get() {
                             Ok(conn) => conn,
                             Err(e) => {
-                                progress.inc(1);
-                                error!(
-                                    "Failed to get database connection for {}: {}",
-                                    img.path.display(),
-                                    e
+                                // First failure - log warning and retry
+                                warn!(
+                                    "Database connection timeout for {}, retrying...",
+                                    img.path.display()
                                 );
-                                return Err(Error::Unknown(format!(
-                                    "Failed to get database connection: {}",
-                                    e
-                                )));
+                                
+                                // Short delay before retry
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                                
+                                // Retry once
+                                match pool.get() {
+                                    Ok(conn) => conn,
+                                    Err(e) => {
+                                        // Second failure - log warning and process without DB
+                                        warn!(
+                                            "Failed to get database connection for {}, processing without DB: {}",
+                                            img.path.display(),
+                                            e
+                                        );
+                                        
+                                        // Process image directly without database
+                                        return Self::process_image_without_db(img);
+                                    }
+                                }
                             }
                         };
 
@@ -331,6 +375,24 @@ impl ImageDeduper {
             );
             // Continue even if database save fails
         }
+
+        Ok(processed_image)
+    }
+    
+    /// Process image without using the database - use for fallback when DB access fails
+    fn process_image_without_db(img: &types::ImageFile) -> Result<types::ProcessedImage> {
+        // Log that we're processing without DB
+        debug!("Processing {} without database access", img.path.display());
+        
+        // Process the image directly
+        let chash = processing::compute_cryptographic(&img.path)?;
+        let phash = processing::phash_from_file(&img.path)?;
+
+        let processed_image = types::ProcessedImage {
+            original: Arc::new(img.clone()),
+            cryptographic_hash: chash,
+            perceptual_hash: phash,
+        };
 
         Ok(processed_image)
     }
