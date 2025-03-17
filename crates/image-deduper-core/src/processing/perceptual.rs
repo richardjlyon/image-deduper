@@ -53,23 +53,80 @@ use std::sync::Once;
 use std::process::Command;
 use std::hash::{Hash, Hasher};
 
-/// A perceptual hash represented as a 64-bit value
+/// A perceptual hash that can be either a 64-bit value (8x8) or a 1024-bit value (32x32)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PHash(pub u64);
+pub enum PHash {
+    /// Standard 64-bit perceptual hash (8x8 grid)
+    Standard(u64),
+    
+    /// Enhanced 1024-bit perceptual hash (32x32 grid) for GPU acceleration
+    /// Stored as 16 u64 values (16 * 64 = 1024 bits)
+    Enhanced([u64; 16]),
+}
 
 impl PHash {
     /// Calculate the Hamming distance between two perceptual hashes
     pub fn distance(&self, other: &PHash) -> u32 {
-        (self.0 ^ other.0).count_ones()
+        match (self, other) {
+            // Both standard 64-bit hashes
+            (PHash::Standard(a), PHash::Standard(b)) => {
+                (a ^ b).count_ones()
+            },
+            
+            // Both enhanced 1024-bit hashes
+            (PHash::Enhanced(a), PHash::Enhanced(b)) => {
+                let mut distance = 0;
+                for i in 0..16 {
+                    distance += (a[i] ^ b[i]).count_ones();
+                }
+                distance
+            },
+            
+            // Mixed types - downgrade enhanced to standard for compatibility
+            (PHash::Standard(a), PHash::Enhanced(b)) => {
+                // Use only the first 64 bits of the enhanced hash
+                (a ^ b[0]).count_ones()
+            },
+            
+            (PHash::Enhanced(a), PHash::Standard(b)) => {
+                // Use only the first 64 bits of the enhanced hash
+                (a[0] ^ b).count_ones()
+            },
+        }
     }
 
     /// Check if two images are perceptually similar based on a threshold
     pub fn is_similar(&self, other: &PHash, threshold: u32) -> bool {
-        self.distance(other) <= threshold
+        let distance = self.distance(other);
+        
+        // Adjust threshold based on hash type (enhanced hashes need higher thresholds)
+        let adjusted_threshold = match (self, other) {
+            (PHash::Standard(_), PHash::Standard(_)) => threshold,
+            (PHash::Enhanced(_), PHash::Enhanced(_)) => threshold * 16, // Scale by hash size ratio
+            _ => threshold, // Mixed types use standard threshold
+        };
+        
+        distance <= adjusted_threshold
+    }
+    
+    /// Convert to a standard 64-bit hash if enhanced
+    pub fn to_standard(&self) -> PHash {
+        match self {
+            PHash::Standard(hash) => PHash::Standard(*hash),
+            PHash::Enhanced(hash_array) => PHash::Standard(hash_array[0]),
+        }
+    }
+    
+    /// Get the underlying 64-bit hash value (for compatibility)
+    pub fn as_u64(&self) -> u64 {
+        match self {
+            PHash::Standard(hash) => *hash,
+            PHash::Enhanced(hash_array) => hash_array[0],
+        }
     }
 }
 
-/// Calculate a 64-bit perceptual hash for an image - ultra optimized version
+/// Calculate a standard 64-bit perceptual hash for an image (8x8 grid)
 #[inline]
 pub fn calculate_phash(img: &DynamicImage) -> PHash {
     // Use fastest filter for downscaling
@@ -133,7 +190,57 @@ pub fn calculate_phash(img: &DynamicImage) -> PHash {
         hash |= (byte as u64) << (chunk * 8);
     }
 
-    PHash(hash)
+    PHash::Standard(hash)
+}
+
+/// Calculate an enhanced 1024-bit perceptual hash for an image (32x32 grid)
+/// For higher quality discrimination and better GPU acceleration potential
+#[inline]
+pub fn calculate_enhanced_phash(img: &DynamicImage) -> PHash {
+    // Use fastest filter for downscaling to 32x32
+    let small = img.resize_exact(32, 32, image::imageops::FilterType::Nearest);
+
+    // Extract grayscale values directly, avoiding full grayscale conversion
+    // Grayscale formula: 0.299*R + 0.587*G + 0.114*B
+    let mut pixels = [0.0; 1024]; // 32x32 = 1024 pixels
+
+    for y in 0..32 {
+        for x in 0..32 {
+            let pixel = small.get_pixel(x, y);
+            let gray_value =
+                0.299 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.114 * pixel[2] as f32;
+            pixels[(y as usize) * 32 + (x as usize)] = gray_value;
+        }
+    }
+
+    // Calculate mean of all pixels
+    let mut sum = 0.0;
+    for &p in &pixels {
+        sum += p;
+    }
+    let mean = sum / 1024.0;
+
+    // Create an array of 16 u64 values (1024 bits total)
+    let mut hash_array = [0u64; 16];
+
+    // Process 64 pixels at a time to fill each u64
+    for segment in 0..16 {
+        let mut hash: u64 = 0;
+        
+        // Each segment processes 64 pixels
+        for i in 0..64 {
+            let pixel_idx = segment * 64 + i;
+            
+            // Set bit if pixel value > mean
+            if pixels[pixel_idx] > mean {
+                hash |= 1u64 << i;
+            }
+        }
+        
+        hash_array[segment] = hash;
+    }
+
+    PHash::Enhanced(hash_array)
 }
 
 /// Ultra-fast implementation for when quality can be traded for speed
@@ -178,7 +285,7 @@ pub fn ultra_fast_phash(img: &DynamicImage) -> PHash {
         }
     }
 
-    PHash(hash)
+    PHash::Standard(hash)
 }
 
 /// Try to convert a problematic TIFF file to a format we can process (optimized)
@@ -258,7 +365,7 @@ fn process_tiff_with_fallback<P: AsRef<Path>>(path: P) -> Result<PHash, image::I
     }
     
     // Return hash value
-    Ok(PHash(hasher.finish()))
+    Ok(PHash::Standard(hasher.finish()))
 }
 
 /// Process RAW image files using macOS or external tools with performance optimizations
@@ -369,10 +476,11 @@ fn process_raw_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError
     }
     
     let filename_hash = hasher.finish();
-    Ok(PHash(filename_hash))
+    Ok(PHash::Standard(filename_hash))
 }
 
 /// Calculate a perceptual hash from an image file
+/// Uses standard 8x8 hash by default
 pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
     let path_ref = path.as_ref();
     
@@ -468,9 +576,47 @@ pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErr
     }
 }
 
-/// Calculate a perceptual hash from an image in memory
+/// Calculate a perceptual hash from an image in memory using standard 8x8 hash
 pub fn phash_from_img(img: &DynamicImage) -> PHash {
     calculate_phash(img)
+}
+
+/// Calculate an enhanced 1024-bit perceptual hash from an image file (32x32 grid) 
+/// For higher quality discrimination and better GPU acceleration potential
+pub fn enhanced_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+    let path_ref = path.as_ref();
+    
+    // Direct handling of problematic file formats by extension first
+    if let Some(ext) = path_ref.extension() {
+        let ext_lower = ext.to_string_lossy().to_lowercase();
+        
+        // Handle HEIC files - convert to standard then enhanced
+        if ext_lower == "heic" {
+            if let Ok(PHash::Standard(hash)) = process_heic_image(path_ref) {
+                return Ok(PHash::Standard(hash)); // Return standard for now
+            }
+        }
+        
+        // Handle other special formats with standard hash for now
+        if ext_lower == "tif" || ext_lower == "tiff" || 
+           ["raw", "dng", "cr2", "nef", "arw", "orf", 
+            "rw2", "nrw", "raf", "crw", "pef", "srw", 
+            "x3f", "rwl", "3fr"].contains(&ext_lower.as_str()) {
+            // These formats use standard hash for compatibility
+            return phash_from_file(path_ref);
+        }
+    }
+    
+    // For standard formats, use the enhanced hash
+    match image::open(path_ref) {
+        Ok(img) => Ok(calculate_enhanced_phash(&img)),
+        Err(e) => Err(e),
+    }
+}
+
+/// Calculate an enhanced perceptual hash from an image in memory
+pub fn enhanced_phash_from_img(img: &DynamicImage) -> PHash {
+    calculate_enhanced_phash(img)
 }
 
 /// Helper function to check if a file is in HEIC format

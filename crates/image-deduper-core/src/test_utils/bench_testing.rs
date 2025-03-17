@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod bench {
-    use crate::processing::{calculate_phash, phash_from_img, ultra_fast_phash};
+    use crate::processing::perceptual::{calculate_phash, phash_from_img, ultra_fast_phash};
     use std::{
         path::Path,
         time::{Duration, Instant},

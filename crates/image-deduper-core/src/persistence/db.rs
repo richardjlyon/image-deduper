@@ -142,7 +142,8 @@ impl Database {
     /// #    created: None
     /// # };
     /// # let cryptographic_hash = vec![1, 2, 3, 4, 5];
-    /// # let perceptual_hash = 12345678;
+    /// # use image_deduper_core::processing::perceptual::PHash;
+    /// # let perceptual_hash = PHash::Standard(12345678);
     ///
     /// let stored_image = StoredImage::new(&image_file, cryptographic_hash, perceptual_hash);
     /// match db.add_image(&stored_image) {
@@ -309,7 +310,7 @@ impl Database {
             let stored_image = StoredImage::new(
                 &image.original,
                 image.cryptographic_hash.as_bytes().to_vec(),
-                image.perceptual_hash.0,
+                image.perceptual_hash,
             );
 
             // Path string
@@ -580,7 +581,7 @@ pub fn save_processed_image_with_conn(
     let stored_image = StoredImage::new(
         &image.original,
         image.cryptographic_hash.as_bytes().to_vec(),
-        image.perceptual_hash.0,
+        image.perceptual_hash,
     );
 
     // Path string

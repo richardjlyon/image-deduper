@@ -4,6 +4,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{ImageFile, ImageFormat};
+use crate::processing::perceptual::PHash;
 
 /// Representation of a stored image with its hashes
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,7 +36,12 @@ pub struct StoredImage {
 
 impl StoredImage {
     /// Create a new stored image from an image file and its hashes
-    pub fn new(image: &ImageFile, cryptographic_hash: Vec<u8>, perceptual_hash: u64) -> Self {
+    pub fn new(image: &ImageFile, cryptographic_hash: Vec<u8>, perceptual_hash: PHash) -> Self {
+        // Extract the u64 value for storage
+        let hash_value = match perceptual_hash {
+            PHash::Standard(hash) => hash,
+            PHash::Enhanced(array) => array[0], // Store only first 64 bits from enhanced hash
+        };
         Self {
             id: None,
             path: image.path.clone(),
@@ -44,7 +50,7 @@ impl StoredImage {
             format: image.format.clone(),
             created: image.created.as_ref().map(system_time_to_unix_timestamp),
             cryptographic_hash,
-            perceptual_hash,
+            perceptual_hash: hash_value,
         }
     }
 

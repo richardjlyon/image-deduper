@@ -19,6 +19,8 @@ walkdir.workspace = true
 # Image processing
 libheif-rs.workspace = true
 image.workspace = true
+metal = "0.27.0"
+objc = "0.2.7"
 
 # Hashing
 blake3.workspace = true
@@ -39,6 +41,7 @@ crossbeam.workspace = true
 rayon.workspace = true
 num_cpus = "1.16"
 ctrlc = "3.4.1"
+once_cell = "1.19.0"   # For lazy initialization
 
 # Progress bars
 indicatif = "0.17"
@@ -56,7 +59,7 @@ log4rs = "1.3.0"
 [dev-dependencies]
 image.workspace = true
 tempfile = "3.18.0"
-once_cell = "1.19.0"   # For lazy initialization in tests
+once_cell = "1.19.0"   # For lazy initialization
 
 [features]
 default = []

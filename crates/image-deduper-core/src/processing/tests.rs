@@ -1,7 +1,8 @@
 #[allow(clippy::module_inception)]
 #[cfg(test)]
 mod tests {
-    use crate::processing::{compute_cryptographic, phash_from_file, process_images};
+    use crate::processing::{compute_cryptographic, process_images};
+    use crate::processing::perceptual::{phash_from_file, PHash};
     use crate::test_utils::test_support::test_image_registry::TEST_IMAGES;
     // Use the test image registry from test_support
     // use crate::test_support::test_image_registry::TEST_IMAGES;
@@ -59,7 +60,10 @@ mod tests {
 
         let phash_img1 = phash_from_file(&img1).unwrap();
         let expected_hash = 0x70008111c7ffffff;
-        assert_eq!(phash_img1.0, expected_hash);
+        match phash_img1 {
+            PHash::Standard(hash) => assert_eq!(hash, expected_hash),
+            _ => panic!("Expected Standard PHash variant"),
+        };
     }
 
     #[test]
@@ -75,7 +79,10 @@ mod tests {
 
         let phash_img1 = phash_from_file(&img1).unwrap();
         let expected_hash = 0x70008111c7ffffff;
-        assert_eq!(phash_img1.0, expected_hash);
+        match phash_img1 {
+            PHash::Standard(hash) => assert_eq!(hash, expected_hash),
+            _ => panic!("Expected Standard PHash variant"),
+        };
     }
 
     #[test]

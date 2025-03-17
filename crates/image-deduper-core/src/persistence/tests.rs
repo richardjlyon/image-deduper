@@ -11,6 +11,7 @@ mod tests {
     };
     use super::super::models::StoredImage;
     use crate::types::{ImageFile, ImageFormat};
+    use crate::processing::perceptual::PHash;
 
     #[test]
     fn test_create_database() {
@@ -39,7 +40,7 @@ mod tests {
 
         // Create test hashes
         let crypto_hash = vec![1, 2, 3, 4, 5];
-        let perceptual_hash = 12345678;
+        let perceptual_hash = PHash::Standard(12345678);
 
         // Create a stored image
         let stored_image = StoredImage::new(&image_file, crypto_hash.clone(), perceptual_hash);
@@ -56,7 +57,12 @@ mod tests {
         assert_eq!(retrieved.size, 1024);
         assert_eq!(retrieved.format, ImageFormat::Jpeg);
         assert_eq!(retrieved.cryptographic_hash, crypto_hash);
-        assert_eq!(retrieved.perceptual_hash, perceptual_hash);
+        // For perceptual_hash, we need to extract the value from the PHash enum
+        if let PHash::Standard(hash) = perceptual_hash {
+            assert_eq!(retrieved.perceptual_hash, hash);
+        } else {
+            panic!("Expected PHash::Standard variant");
+        }
     }
 
     #[test]
@@ -76,7 +82,7 @@ mod tests {
         };
 
         // Create a stored image
-        let stored_image = StoredImage::new(&image_file, vec![1, 2, 3, 4, 5], 12345678);
+        let stored_image = StoredImage::new(&image_file, vec![1, 2, 3, 4, 5], PHash::Standard(12345678));
 
         // Add the image to the database
         let _id = add_image(&db_path, &stored_image).unwrap();
@@ -107,7 +113,7 @@ mod tests {
         };
 
         // Create a stored image
-        let stored_image = StoredImage::new(&image_file, vec![1, 2, 3, 4, 5], 12345678);
+        let stored_image = StoredImage::new(&image_file, vec![1, 2, 3, 4, 5], PHash::Standard(12345678));
 
         // Add the image to the database
         let _id = add_image(&db_path, &stored_image).unwrap();

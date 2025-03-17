@@ -59,7 +59,8 @@
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! # let image_file = ImageFile { path: PathBuf::new(), size: 0, last_modified: std::time::SystemTime::now(), format: image_deduper_core::types::ImageFormat::Jpeg, created: None };
 //! # let cryptographic_hash = vec![0u8; 32];
-//! # let perceptual_hash = 0u64;
+//! # use image_deduper_core::processing::perceptual::PHash;
+//! # let perceptual_hash = PHash::Standard(0u64);
 //! # let db_path = PathBuf::new();
 //! // After processing an image and generating hashes
 //! let stored_image = StoredImage::new(&image_file, cryptographic_hash, perceptual_hash);
@@ -78,7 +79,7 @@
 //! # let db_path = PathBuf::new();
 //! # let image_path = PathBuf::new();
 //! # let crypto_hash = vec![0u8; 32];
-//! # let perceptual_hash = 0u64;
+//! # let perceptual_hash = 0u64; // u64 is fine here since DB stores the raw value
 //! // Get by path
 //! let image = get_image_by_path(&db_path, &image_path)?;
 //!
