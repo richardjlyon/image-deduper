@@ -7,7 +7,7 @@ mod tests {
     // use crate::test_support::test_image_registry::TEST_IMAGES;
 
     #[test]
-    fn test_cryptographic_hash() {
+    fn test_jpg_cryptographic_hash() {
         let img_path = TEST_IMAGES
             .get_image_path(
                 "jpg",           // file_type
@@ -27,7 +27,59 @@ mod tests {
     }
 
     #[test]
-    fn test_phash_ne() {
+    fn test_heic_cryptographic_hash() {
+        let img_path = TEST_IMAGES
+            .get_image_path(
+                "heic",          // file_type
+                "IMG-2624x3636", // image_name
+                "original",      // transformation
+                None,            // transformation_parameter
+            )
+            .unwrap();
+
+        // Compute the hash
+        let result = compute_cryptographic(&img_path).unwrap();
+        // Computed with the b3sum utility
+        let expected_hash = "96c6c4bba9a39818c2645ba48a2530d71122c446c173eab88c46120e38d769b4";
+
+        // Verify the hash matches
+        assert_eq!(result.to_string(), expected_hash);
+    }
+
+    #[test]
+    fn test_jpg_phash() {
+        let img1 = TEST_IMAGES
+            .get_image_path(
+                "jpg",           // file_type
+                "IMG-2624x3636", // image_name
+                "original",      // transformation
+                None,            // transformation_parameter
+            )
+            .unwrap();
+
+        let phash_img1 = phash_from_file(&img1).unwrap();
+        let expected_hash = 0x70008111c7ffffff;
+        assert_eq!(phash_img1.0, expected_hash);
+    }
+
+    #[test]
+    fn test_heic_phash() {
+        let img1 = TEST_IMAGES
+            .get_image_path(
+                "heic",          // file_type
+                "IMG-2624x3636", // image_name
+                "original",      // transformation
+                None,            // transformation_parameter
+            )
+            .unwrap();
+
+        let phash_img1 = phash_from_file(&img1).unwrap();
+        let expected_hash = 0x70008111c7ffffff;
+        assert_eq!(phash_img1.0, expected_hash);
+    }
+
+    #[test]
+    fn test_jpgphash_ne() {
         let img1 = TEST_IMAGES
             .get_image_path(
                 "jpg",           // file_type

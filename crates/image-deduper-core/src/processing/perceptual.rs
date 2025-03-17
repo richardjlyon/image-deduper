@@ -180,7 +180,60 @@ pub fn ultra_fast_phash(img: &DynamicImage) -> PHash {
 
 /// Calculate a perceptual hash from an image file
 pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
-    let img = image::open(path)?;
+    let path_ref = path.as_ref();
+    
+    // Check if the file is a HEIC image
+    if let Some(ext) = path_ref.extension() {
+        if ext.to_string_lossy().to_lowercase() == "heic" {
+            // Create a custom error for HEIC issues
+            let heic_error = |msg: &str| -> image::ImageError {
+                image::ImageError::Unsupported(
+                    image::error::UnsupportedError::from_format_and_kind(
+                        image::error::ImageFormatHint::Name("HEIC".to_string()),
+                        image::error::UnsupportedErrorKind::GenericFeature(msg.to_string())
+                    )
+                )
+            };
+            
+            // Use libheif to read the file
+            let path_str = path_ref.to_str().ok_or_else(|| 
+                heic_error("Invalid path for HEIC file"))?;
+                
+            let ctx = libheif_rs::HeifContext::read_from_file(path_str)
+                .map_err(|e| heic_error(&format!("Failed to read HEIC: {}", e)))?;
+            
+            // Get primary image handle
+            let handle = ctx.primary_image_handle()
+                .map_err(|e| heic_error(&format!("Failed to get HEIC handle: {}", e)))?;
+            
+            // Decode the image
+            let heif_img = handle.decode(libheif_rs::ColorSpace::Rgb(libheif_rs::RgbChroma::Rgb), None)
+                .map_err(|e| heic_error(&format!("Failed to decode HEIC: {}", e)))?;
+            
+            // Get dimensions
+            let width = heif_img.width();
+            let height = heif_img.height();
+            
+            // Access the image data
+            if let Some(plane) = heif_img.planes().interleaved {
+                // Access the raw data
+                let pixel_data = plane.data;
+                
+                // Create an RGB image
+                let img = image::RgbImage::from_raw(width, height, pixel_data.to_vec())
+                    .ok_or_else(|| heic_error("Failed to create RGB image from HEIC data"))?;
+                
+                // Convert to DynamicImage and compute hash
+                let dynamic_img = image::DynamicImage::ImageRgb8(img);
+                return Ok(calculate_phash(&dynamic_img));
+            } else {
+                return Err(heic_error("HEIC image doesn't have interleaved data"));
+            }
+        }
+    }
+    
+    // Default path for non-HEIC images
+    let img = image::open(path_ref)?;
     Ok(calculate_phash(&img))
 }
 
@@ -210,8 +263,8 @@ impl ImageCache {
             return Ok(*hash);
         }
 
-        let img = image::open(&path)?;
-        let hash = calculate_phash(&img);
+        // Use the phash_from_file function which handles HEIC files
+        let hash = phash_from_file(&path)?;
 
         // Simple LRU-like behavior: clear cache if it's too big
         if self.cache.len() >= self.buffer_size {
