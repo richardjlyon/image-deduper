@@ -18,11 +18,13 @@ use std::{path::Path, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 
 // -- Internal Modules --
 mod error;
+mod simple_deduper;
 
 // -- Public Re-exports --
 pub use config::*;
 pub use error::{Error, Result};
 pub use types::*;
+pub use simple_deduper::SimpleDeduper;
 
 // -- Public Modules --
 pub mod action;
@@ -70,15 +72,65 @@ impl ImageDeduper {
         // database remains consistent, and let it recover on the next
         // application start
         info!("SQLite WAL mode is active - database will auto-recover on next start");
+        
+        // Spawn an emergency watchdog thread that forces process termination
+        // if we're still running after too long
+        std::thread::spawn(move || {
+            // Wait up to 25 seconds for graceful shutdown
+            std::thread::sleep(std::time::Duration::from_secs(25));
+            
+            // If we reach here, the process is still running and likely hung
+            log::error!("EMERGENCY SHUTDOWN: Process appears to be hung after 25 seconds");
+            log::error!("Forcing process termination to prevent indefinite hang");
+            
+            // Give one last second to log
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            
+            // Force exit with error code
+            std::process::exit(1);
+        });
     }
     
     /// Check if shutdown has been requested
     fn is_shutdown_requested(&self) -> bool {
         self.shutdown_requested.load(Ordering::SeqCst)
     }
+    
+    /// Check if operations should be interrupted due to shutdown
+    /// This is more aggressive than regular shutdown check and will
+    /// abort operations that are in wait states or potentially hung
+    fn should_interrupt_operations(&self) -> bool {
+        static SHUTDOWN_TIME: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+        
+        // Check if shutdown was requested
+        if self.shutdown_requested.load(Ordering::SeqCst) {
+            // Record the first time shutdown was requested
+            let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                Ok(n) => n.as_secs() as i64,
+                Err(_) => 0,
+            };
+            
+            let first_shutdown_time = SHUTDOWN_TIME.load(Ordering::SeqCst);
+            if first_shutdown_time == 0 {
+                // First time seeing the shutdown request, record the time
+                SHUTDOWN_TIME.store(now, Ordering::SeqCst);
+                return false; // Don't interrupt immediately
+            } else {
+                // Check if it's been more than 10 seconds since shutdown was requested
+                let elapsed = now - first_shutdown_time;
+                if elapsed > 10 {
+                    // If more than 10 seconds passed, force operations to terminate
+                    warn!("Forcing termination of operations after {} seconds of shutdown request", elapsed);
+                    return true;
+                }
+            }
+        }
+        
+        false
+    }
 
     /// Run the full deduplication pipeline
-    pub fn run(&self, directories: &[impl AsRef<Path>], force_rescan: bool) -> Result<()> {
+    pub fn run(&self, directories: &[impl AsRef<Path>], force_rescan: bool) -> Result<Vec<types::ProcessedImage>> {
         // Discover images
         info!("Discovering images...");
         let images = self.discover_images(directories)?;
@@ -105,7 +157,7 @@ impl ImageDeduper {
         //     self.execute_deduplication(&duplicate_groups)
         // }
 
-        Ok(())
+        Ok(processed_images)
     }
 
     /// Discover all images in the provided directories
@@ -128,7 +180,7 @@ impl ImageDeduper {
             total_images, force_rescan
         );
 
-        // Set up progress bar
+        // Set up progress bar with improved accuracy tracking
         let progress = ProgressBar::new(total_images as u64);
         progress.set_style(
             ProgressStyle::default_bar()
@@ -138,6 +190,9 @@ impl ImageDeduper {
                 .unwrap()
                 .progress_chars("#>-"),
         );
+        
+        // Metrics to track actual processing numbers
+        let total_processed_count = std::sync::atomic::AtomicUsize::new(0);
 
         // Create a thread-safe progress bar
         let progress = Arc::new(progress);
@@ -159,14 +214,15 @@ impl ImageDeduper {
         // Higher concurrency while maintaining stability
         // We'll use more connections but with better timeout handling
         let cpu_count = num_cpus::get() as u32;
-        // Use a more modest connection pool to prevent SQLite contention
-        let max_connections = std::cmp::min(std::cmp::max(8, cpu_count), 24); // Between 8 and 24 connections
+        // Use a larger connection pool size to prevent connection exhaustion
+        // especially for large image collections (34k+)
+        let max_connections = std::cmp::min(std::cmp::max(16, cpu_count * 2), 48); // Between 16 and 48 connections
         
         // Configure pool with improved settings for performance
         let pool = match Pool::builder()
             .max_size(max_connections)
-            .min_idle(Some(8)) // Increased idle connections to reduce waits
-            .connection_timeout(std::time::Duration::from_secs(5)) // Longer timeout to allow for busy periods
+            .min_idle(Some(16)) // Increased idle connections to reduce waits
+            .connection_timeout(std::time::Duration::from_secs(15)) // Much longer timeout for large jobs
             .build(manager)
         {
             Ok(pool) => pool,
@@ -186,10 +242,10 @@ impl ImageDeduper {
                 "PRAGMA journal_mode = WAL;
                  PRAGMA synchronous = NORMAL;
                  PRAGMA temp_store = MEMORY;
-                 PRAGMA cache_size = 20000;
-                 PRAGMA busy_timeout = 30000;
+                 PRAGMA cache_size = 30000;
+                 PRAGMA busy_timeout = 60000;
                  PRAGMA mmap_size = 30000000000;
-                 PRAGMA threads = 4;
+                 PRAGMA threads = 8;
                  PRAGMA page_size = 32768;"
             );
             
@@ -235,14 +291,66 @@ impl ImageDeduper {
         debug!("Database initialized successfully");
 
         // Process images in smaller chunks for better parallelism
-        // Smaller chunks allow more even distribution of work
-        let chunk_size = 100; // Reduced chunk size to minimize database contention
+        // Using very small chunks for better distribution of work and to reduce database contention
+        let chunk_size = 50; // Further reduced chunk size to minimize database contention with large image sets
         let mut processed = Vec::with_capacity(total_images);
         let mut failed_images = Vec::new();
         
         // Performance metrics tracking
         let start_time = std::time::Instant::now();
         let newly_processed_count = std::sync::atomic::AtomicUsize::new(0);
+        
+        // Track chunk progress for deadlock detection
+        let chunk_progress = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let chunk_progress_clone = Arc::clone(&chunk_progress);
+        
+        // Add counters for metrics on DB lookups vs actual processing
+        let db_lookup_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let db_lookup_counter_clone = Arc::clone(&db_lookup_counter);
+        
+        // Only enable deadlock detection in non-force mode, as force mode will
+        // always show progress but normal mode might legitimately have long periods
+        // of database lookups with few actual new images to process
+        if !force_rescan {
+            // Spawn a monitor thread that detects if chunk processing is completely stalled
+            let shutdown_clone = Arc::clone(&self.shutdown_requested);
+            std::thread::spawn(move || {
+                let mut last_counter = 0;
+                let mut stall_detected_count = 0;
+                
+                // Only check for chunk progress stalls - this is different from processing 
+                // individual images, since the app might be finding images in the database
+                // (which is fast and not a problem)
+                while !shutdown_clone.load(Ordering::SeqCst) {
+                    // Use longer interval (20s) since database lookups can be quick
+                    std::thread::sleep(std::time::Duration::from_secs(20));
+                    
+                    let current = chunk_progress_clone.load(Ordering::SeqCst);
+                    let db_lookups = db_lookup_counter_clone.load(Ordering::SeqCst);
+                    
+                    if current == last_counter {
+                        // No chunk progress in 20 seconds
+                        stall_detected_count += 1;
+                        
+                        // Log information about chunks vs db lookups to diagnose issues
+                        log::info!("Health monitor: No chunk progress for {}s. Processed {} chunks, performed {} DB lookups.", 
+                                stall_detected_count * 20, current, db_lookups);
+                        
+                        // Only force shutdown after 3 minutes (9 * 20s) with no progress
+                        if stall_detected_count >= 9 {
+                            log::error!("CRITICAL: No chunk processing progress detected for 3 minutes");
+                            log::error!("This suggests a serious application problem - forcing recovery");
+                            shutdown_clone.store(true, Ordering::SeqCst);
+                            break;
+                        }
+                    } else {
+                        // Chunks are still being processed, reset counter
+                        stall_detected_count = 0;
+                        last_counter = current;
+                    }
+                }
+            });
+        }
         
         // Only configure the thread pool if we haven't already
         // This avoids the "already initialized" warning when running multiple times
@@ -270,7 +378,7 @@ impl ImageDeduper {
                 break 'chunks;
             }
             
-            let chunk_message = format!("Processing chunk {}", chunk_index + 1);
+            let chunk_message = format!("Processing chunk {}/{}", chunk_index + 1, (total_images + chunk_size - 1) / chunk_size);
             progress.set_message(chunk_message.clone());
             debug!("{} ({} images)", chunk_message, chunk.len());
 
@@ -284,9 +392,18 @@ impl ImageDeduper {
 
                     // Check for shutdown signal before processing each image
                     if shutdown_requested.load(Ordering::SeqCst) {
-                        progress.inc(1);
+                        // Don't increment progress.inc() here to get accurate numbers
                         return Err(Error::Unknown("Shutdown requested".to_string()));
                     }
+                    
+                    // Add extra timeout checks - if we've been waiting too long during shutdown
+                    if self.should_interrupt_operations() {
+                        // Don't increment progress.inc() here to get accurate numbers
+                        return Err(Error::Unknown("Forced interruption after shutdown timeout".to_string()));
+                    }
+                    
+                    // Count this as a total attempt regardless of outcome
+                    total_processed_count.fetch_add(1, Ordering::Relaxed);
                     
                     let result = if !force_rescan {
                         // Get a connection from the pool with retry logic
@@ -299,34 +416,51 @@ impl ImageDeduper {
                                     img.path.display()
                                 );
                                 
-                                // Variable backoff based on system load
-                                let backoff = if max_connections > 16 {
-                                    50 // Less backoff for larger connection pools
+                                // Randomized backoff to prevent connection stampedes
+                                // Add jitter (25-125% of base value) to prevent threads from retrying simultaneously
+                                let rand_multiplier = 0.75 + (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default().as_nanos() % 100) as f64 / 100.0 + 0.5;
+                                let backoff = if max_connections > 32 {
+                                    (50.0 * rand_multiplier) as u64 // Less backoff for larger connection pools
                                 } else {
-                                    200 // More backoff for smaller pools
+                                    (150.0 * rand_multiplier) as u64 // More backoff for smaller pools
                                 };
                                 std::thread::sleep(std::time::Duration::from_millis(backoff));
+                                
+                                // Before retrying, check if we should abort due to shutdown timeout
+                                if self.should_interrupt_operations() {
+                                    progress.inc(1);
+                                    return Err(Error::Unknown("Forced interruption during database connection attempt".to_string()));
+                                }
                                 
                                 // Retry once
                                 match pool.get() {
                                     Ok(conn) => conn,
                                     Err(e) => {
                                         // Second failure - log error and skip this file
-                                        progress.inc(1);
+                                        // Don't increment progress counter here - we'll do it at the end
                                         error!(
                                             "Failed to get database connection while processing {}: {}",
                                             img.path.display(),
                                             e
                                         );
                                         
+                                        // Check again if we should abort due to shutdown timeout
+                                        if self.should_interrupt_operations() {
+                                            return Err(Error::Unknown("Forced interruption after database connection failures".to_string()));
+                                        }
+                                        
                                         // Instead of failing, skip this file with a warning and continue
                                         warn!("Skipping database lookup for {}, continuing with direct processing", img.path.display());
                                         
                                         // Longer sleep on second failure to prevent thundering herd reconnection
-                                        let extended_backoff = if max_connections > 16 {
-                                            100 // Less backoff for larger connection pools
+                                        // Use exponential backoff with randomization for second retries
+                                        let rand_multiplier = 0.75 + (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default().as_nanos() % 150) as f64 / 100.0 + 0.5;
+                                        let extended_backoff = if max_connections > 32 {
+                                            (200.0 * rand_multiplier) as u64 // Less backoff for larger connection pools
                                         } else {
-                                            500 // More backoff for smaller pools
+                                            (800.0 * rand_multiplier) as u64 // More backoff for smaller pools
                                         };
                                         std::thread::sleep(std::time::Duration::from_millis(extended_backoff));
                                         
@@ -340,6 +474,8 @@ impl ImageDeduper {
                         // Try to get from database first
                         match persistence::get_image_by_path_with_conn(&conn, &img.path) {
                             Ok(stored_image) => {
+                                // Increment database lookup counter for deadlock detection
+                                db_lookup_counter.fetch_add(1, Ordering::Relaxed);
                                 trace!(
                                     "Found image {} in database, using cached data",
                                     img.path.display()
@@ -350,7 +486,7 @@ impl ImageDeduper {
                                     match stored_image.cryptographic_hash.try_into() {
                                         Ok(hash) => hash,
                                         Err(_) => {
-                                            progress.inc(1);
+                                            // Don't increment progress to get accurate numbers
                                             logging::log_hash_error(
                                                 &img.path,
                                                 &std::io::Error::new(
@@ -410,13 +546,22 @@ impl ImageDeduper {
                                     img.path.display()
                                 );
                                 
-                                // Variable backoff based on system load
-                                let backoff = if max_connections > 16 {
-                                    50 // Less backoff for larger connection pools
+                                // Randomized backoff to prevent connection stampedes
+                                // Add jitter (25-125% of base value) to prevent threads from retrying simultaneously
+                                let rand_multiplier = 0.75 + (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default().as_nanos() % 100) as f64 / 100.0 + 0.5;
+                                let backoff = if max_connections > 32 {
+                                    (50.0 * rand_multiplier) as u64 // Less backoff for larger connection pools
                                 } else {
-                                    200 // More backoff for smaller pools
+                                    (150.0 * rand_multiplier) as u64 // More backoff for smaller pools
                                 };
                                 std::thread::sleep(std::time::Duration::from_millis(backoff));
+                                
+                                // Before retrying, check if we should abort due to shutdown timeout
+                                if self.should_interrupt_operations() {
+                                    progress.inc(1);
+                                    return Err(Error::Unknown("Forced interruption during database connection attempt".to_string()));
+                                }
                                 
                                 // Retry once
                                 match pool.get() {
@@ -428,6 +573,12 @@ impl ImageDeduper {
                                             img.path.display(),
                                             e2
                                         );
+                                        
+                                        // Check again if we should abort due to shutdown timeout
+                                        if self.should_interrupt_operations() {
+                                            // Don't increment progress to get accurate numbers
+                                            return Err(Error::Unknown("Forced interruption after database connection failures".to_string()));
+                                        };
                                         
                                         // Process image directly without database
                                         return self.process_image_without_db(img);
@@ -452,6 +603,7 @@ impl ImageDeduper {
                         }
                     };
 
+                    // Here we DO want to increment progress for UI only, doesn't affect total counts
                     progress.inc(1);
                     result
                 })
@@ -464,29 +616,79 @@ impl ImageDeduper {
                     Err(e) => failed_images.push((img.path.clone(), e)),
                 }
             }
+            
+            // Increment chunk progress counter to signal progress to monitor thread
+            chunk_progress.fetch_add(1, Ordering::SeqCst);
         }
 
         // Calculate processing statistics
         let total_elapsed = start_time.elapsed();
         let newly_processed = newly_processed_count.load(Ordering::Relaxed);
+        let actually_processed = total_processed_count.load(Ordering::Relaxed);
+        
+        // Get database lookup count for accurate reporting
+        let db_lookups = db_lookup_counter.load(Ordering::Relaxed);
+        let chunks_processed = chunk_progress.load(Ordering::Relaxed);
+        let expected_chunks = (total_images + chunk_size - 1) / chunk_size;
         
         let stats_message = if newly_processed > 0 {
             let avg_time_ms = (total_elapsed.as_millis() as f64) / (newly_processed as f64);
-            format!(
-                "Processing complete - {} succeeded, {} failed. {} new images processed in {:?} (avg {:.2}ms per image)",
-                processed.len(),
-                failed_images.len(),
-                newly_processed,
-                total_elapsed,
-                avg_time_ms
-            )
+            if force_rescan {
+                format!(
+                    "Processing complete - {} images processed with force_rescan=true. {} succeeded, {} failed, {} attempted in {:?} (avg {:.2}ms per image)",
+                    newly_processed,
+                    processed.len(),
+                    failed_images.len(),
+                    actually_processed,
+                    total_elapsed,
+                    avg_time_ms
+                )
+            } else {
+                let completion_status = if chunks_processed >= expected_chunks {
+                    "COMPLETE"
+                } else {
+                    "PARTIAL"
+                };
+                
+                format!(
+                    "{} Processing - {} succeeded, {} failed, {} attempted. {} new images processed in {:?} (avg {:.2}ms per image). {} images were found in database and skipped. Processed {}/{} chunks.",
+                    completion_status,
+                    processed.len(),
+                    failed_images.len(),
+                    actually_processed,
+                    newly_processed,
+                    total_elapsed,
+                    avg_time_ms,
+                    db_lookups,
+                    chunks_processed,
+                    expected_chunks
+                )
+            }
         } else {
             format!(
-                "Processing complete - {} succeeded, {} failed. All images were already in database.",
-                processed.len(),
-                failed_images.len()
+                "Processing complete - No new images needed processing. {} images were found in database and skipped. Processed {}/{} chunks.",
+                db_lookups,
+                chunks_processed,
+                expected_chunks
             )
         };
+        
+        // Show accurate information about database lookups vs total processing
+        if !force_rescan {
+            let db_lookups = db_lookup_counter.load(Ordering::Relaxed);
+            let chunks_processed = chunk_progress.load(Ordering::Relaxed);
+            
+            if db_lookups > 0 {
+                info!("Database efficiency: {} images were found in database and skipped processing", db_lookups);
+            }
+            
+            // Only show warning if we didn't process many chunks but had lots of images
+            let expected_chunks = (total_images + chunk_size - 1) / chunk_size;
+            if chunks_processed < expected_chunks / 2 && total_images > 1000 {
+                warn!("Only processed {}/{} chunks - processing may have terminated early", 
+                      chunks_processed, expected_chunks);
+            }
+        }
         
         progress.finish_with_message(stats_message.clone());
         info!("{}", stats_message);
