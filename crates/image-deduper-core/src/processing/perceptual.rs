@@ -178,63 +178,134 @@ pub fn ultra_fast_phash(img: &DynamicImage) -> PHash {
     PHash(hash)
 }
 
+/// Detect if a file is HEIC format by reading its magic bytes
+fn is_heic_format<P: AsRef<Path>>(path: P) -> bool {
+    use std::io::Read;
+    
+    if let Ok(mut file) = std::fs::File::open(path.as_ref()) {
+        let mut buffer = [0; 12];
+        if file.read_exact(&mut buffer).is_ok() {
+            // HEIC/HEIF format signatures
+            if (buffer[4..8] == [b'f', b't', b'y', b'p']) || 
+               (buffer[4..8] == [b'h', b'e', b'i', b'c']) ||
+               (buffer[4..8] == [b'h', b'e', b'i', b'f']) ||
+               (buffer[4..8] == [b'm', b'i', b'f', b'1']) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Process a HEIC image using libheif
+fn process_heic_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+    let path_ref = path.as_ref();
+    
+    // Create a custom error for HEIC issues
+    let heic_error = |msg: &str| -> image::ImageError {
+        image::ImageError::Unsupported(
+            image::error::UnsupportedError::from_format_and_kind(
+                image::error::ImageFormatHint::Name("HEIC".to_string()),
+                image::error::UnsupportedErrorKind::GenericFeature(msg.to_string())
+            )
+        )
+    };
+    
+    // Use libheif to read the file
+    let path_str = path_ref.to_str().ok_or_else(|| 
+        heic_error("Invalid path for HEIC file"))?;
+        
+    let ctx = libheif_rs::HeifContext::read_from_file(path_str)
+        .map_err(|e| heic_error(&format!("Failed to read HEIC: {}", e)))?;
+    
+    // Get primary image handle
+    let handle = ctx.primary_image_handle()
+        .map_err(|e| heic_error(&format!("Failed to get HEIC handle: {}", e)))?;
+    
+    // Decode the image
+    let heif_img = handle.decode(libheif_rs::ColorSpace::Rgb(libheif_rs::RgbChroma::Rgb), None)
+        .map_err(|e| heic_error(&format!("Failed to decode HEIC: {}", e)))?;
+    
+    // Get dimensions
+    let width = heif_img.width();
+    let height = heif_img.height();
+    
+    // Access the image data
+    if let Some(plane) = heif_img.planes().interleaved {
+        // Access the raw data
+        let pixel_data = plane.data;
+        
+        // Create an RGB image
+        let img = image::RgbImage::from_raw(width, height, pixel_data.to_vec())
+            .ok_or_else(|| heic_error("Failed to create RGB image from HEIC data"))?;
+        
+        // Convert to DynamicImage and compute hash
+        let dynamic_img = image::DynamicImage::ImageRgb8(img);
+        return Ok(calculate_phash(&dynamic_img));
+    } else {
+        return Err(heic_error("HEIC image doesn't have interleaved data"));
+    }
+}
+
 /// Calculate a perceptual hash from an image file
 pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
     let path_ref = path.as_ref();
     
-    // Check if the file is a HEIC image
+    // First, handle files with .heic extension directly
     if let Some(ext) = path_ref.extension() {
         if ext.to_string_lossy().to_lowercase() == "heic" {
-            // Create a custom error for HEIC issues
-            let heic_error = |msg: &str| -> image::ImageError {
-                image::ImageError::Unsupported(
-                    image::error::UnsupportedError::from_format_and_kind(
-                        image::error::ImageFormatHint::Name("HEIC".to_string()),
-                        image::error::UnsupportedErrorKind::GenericFeature(msg.to_string())
-                    )
-                )
-            };
-            
-            // Use libheif to read the file
-            let path_str = path_ref.to_str().ok_or_else(|| 
-                heic_error("Invalid path for HEIC file"))?;
-                
-            let ctx = libheif_rs::HeifContext::read_from_file(path_str)
-                .map_err(|e| heic_error(&format!("Failed to read HEIC: {}", e)))?;
-            
-            // Get primary image handle
-            let handle = ctx.primary_image_handle()
-                .map_err(|e| heic_error(&format!("Failed to get HEIC handle: {}", e)))?;
-            
-            // Decode the image
-            let heif_img = handle.decode(libheif_rs::ColorSpace::Rgb(libheif_rs::RgbChroma::Rgb), None)
-                .map_err(|e| heic_error(&format!("Failed to decode HEIC: {}", e)))?;
-            
-            // Get dimensions
-            let width = heif_img.width();
-            let height = heif_img.height();
-            
-            // Access the image data
-            if let Some(plane) = heif_img.planes().interleaved {
-                // Access the raw data
-                let pixel_data = plane.data;
-                
-                // Create an RGB image
-                let img = image::RgbImage::from_raw(width, height, pixel_data.to_vec())
-                    .ok_or_else(|| heic_error("Failed to create RGB image from HEIC data"))?;
-                
-                // Convert to DynamicImage and compute hash
-                let dynamic_img = image::DynamicImage::ImageRgb8(img);
-                return Ok(calculate_phash(&dynamic_img));
-            } else {
-                return Err(heic_error("HEIC image doesn't have interleaved data"));
-            }
+            return process_heic_image(path_ref);
         }
     }
     
-    // Default path for non-HEIC images
-    let img = image::open(path_ref)?;
-    Ok(calculate_phash(&img))
+    // Try to open the image with the standard image library first
+    match image::open(path_ref) {
+        Ok(img) => return Ok(calculate_phash(&img)),
+        Err(e) => {
+            let error_str = format!("{:?}", e);
+            
+            // If we get an SOI marker error, we might have a HEIC file with a .jpg extension
+            if error_str.contains("first two bytes are not an SOI marker") {
+                // Check if it's actually a HEIC file (regardless of extension)
+                if is_heic_format(path_ref) {
+                    log::warn!("Found HEIC file with incorrect .jpg extension: {}", path_ref.display());
+                    
+                    // Try to process it as a HEIC file
+                    match process_heic_image(path_ref) {
+                        Ok(hash) => {
+                            log::info!("Successfully processed misnamed HEIC file: {}", path_ref.display());
+                            return Ok(hash);
+                        }
+                        Err(heic_err) => {
+                            log::error!("Failed to process misnamed HEIC file: {}, Error: {}", 
+                                       path_ref.display(), heic_err);
+                            // Fall through to return original error
+                        }
+                    }
+                } else {
+                    // If not HEIC, try to recover JPEG by finding SOI marker
+                    log::warn!("Attempting to recover corrupted JPEG: {}", path_ref.display());
+                    
+                    if let Ok(data) = std::fs::read(path_ref) {
+                        // Search for JPEG SOI marker (0xFFD8)
+                        for i in 0..data.len().saturating_sub(1) {
+                            if data[i] == 0xFF && data[i + 1] == 0xD8 {
+                                // Found SOI marker, try loading the JPEG from this offset
+                                if let Ok(img) = image::load_from_memory(&data[i..]) {
+                                    log::info!("Recovered JPEG image after skipping {} bytes: {}", 
+                                              i, path_ref.display());
+                                    return Ok(calculate_phash(&img));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // If all recovery attempts failed, return the original error
+            return Err(e);
+        }
+    }
 }
 
 /// Calculate a perceptual hash from an image in memory
