@@ -82,6 +82,9 @@ pub struct Config {
 
     /// Directories to exclude from image scanning
     pub excluded_directories: Vec<PathBuf>,
+    
+    /// Whether to use GPU acceleration for perceptual hashing (if available)
+    pub use_gpu_acceleration: bool,
 }
 
 impl Default for Config {
@@ -107,6 +110,7 @@ impl Default for Config {
             batch_size: Some(100),
             log_level: LogLevel::Info,
             excluded_directories: Vec::new(),
+            use_gpu_acceleration: true, // Enable by default on supported platforms
         }
     }
 }

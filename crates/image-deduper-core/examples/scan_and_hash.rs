@@ -60,6 +60,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
         database_path: Some(PathBuf::from("image-deduper.db")),
         batch_size: Some(100),
         log_level: LogLevel::Debug,
+        use_gpu_acceleration: true, // Enable GPU acceleration
         excluded_directories: vec![PathBuf::from(
             "/Volumes/SamsungT7/mylio-vault-backup-250317/Generated Images.bundle",
         )],
@@ -85,20 +86,10 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
         // Signal shutdown to the deduper
-        println!("Graceful shutdown in progress. Closing database connections and checkpointing WAL...");
+        println!("Graceful shutdown in progress...");
         
-        // Get database path from config
-        let db_path = PathBuf::from("image-deduper.db");
-        
-        // First checkpoint the WAL file to ensure all changes are in the main database file
-        if std::path::Path::new(&db_path).exists() {
-            if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-                match conn.query_row("PRAGMA wal_checkpoint(FULL)", [], |_| { Ok(()) }) {
-                    Ok(_) => println!("Database WAL checkpoint complete - changes saved to main database file"),
-                    Err(e) => println!("Warning: Unable to checkpoint database: {}", e)
-                }
-            }
-        }
+        // IMPORTANT: Do NOT perform database operations during shutdown 
+        // SQLite WAL mode ensures database consistency even when interrupted
         
         // Now request the main shutdown
         deduper_clone.request_shutdown();

@@ -62,21 +62,14 @@ impl ImageDeduper {
         self.shutdown_requested.store(true, Ordering::SeqCst);
         info!("Shutdown requested. Finishing current operations...");
         
-        // Checkpoint WAL files before shutting down
-        if self.config.use_database {
-            let db_path = self.config
-                .database_path
-                .clone()
-                .unwrap_or_else(|| std::path::PathBuf::from("image_deduper.db"));
-                
-            // Try to do a direct checkpoint if possible
-            if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-                match conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| { Ok(()) }) {
-                    Ok(_) => info!("Successfully checkpointed database WAL before shutdown"),
-                    Err(e) => warn!("Failed to checkpoint WAL during shutdown: {}", e)
-                }
-            }
-        }
+        // CRITICAL: Do NOT attempt to checkpoint or vacuum during Ctrl+C
+        // This is counterintuitive, but when SQLite is interrupted,
+        // additional operations are more likely to corrupt the database
+        // 
+        // Instead, we rely on SQLite's WAL mode to ensure that the
+        // database remains consistent, and let it recover on the next
+        // application start
+        info!("SQLite WAL mode is active - database will auto-recover on next start");
     }
     
     /// Check if shutdown has been requested
@@ -338,7 +331,7 @@ impl ImageDeduper {
                                         std::thread::sleep(std::time::Duration::from_millis(extended_backoff));
                                         
                                         // Process the file directly instead of database lookup
-                                        return Self::process_image_without_db(img);
+                                        return self.process_image_without_db(img);
                                     }
                                 }
                             }
@@ -391,7 +384,7 @@ impl ImageDeduper {
                                 newly_processed_counter.fetch_add(1, Ordering::Relaxed);
                                 
                                 let start = std::time::Instant::now();
-                                match Self::process_single_image(img, &conn) {
+                                match self.process_single_image(img, &conn) {
                                     Ok(processed_image) => {
                                         trace!("Processed new image {} in {:?}", img.path.display(), start.elapsed());
                                         Ok(processed_image)
@@ -437,7 +430,7 @@ impl ImageDeduper {
                                         );
                                         
                                         // Process image directly without database
-                                        return Self::process_image_without_db(img);
+                                        return self.process_image_without_db(img);
                                     }
                                 }
                             }
@@ -447,7 +440,7 @@ impl ImageDeduper {
                         newly_processed_counter.fetch_add(1, Ordering::Relaxed);
                         
                         let start = std::time::Instant::now();
-                        match Self::process_single_image(img, &conn) {
+                        match self.process_single_image(img, &conn) {
                             Ok(processed_image) => {
                                 trace!("Force-processed image {} in {:?}", img.path.display(), start.elapsed());
                                 Ok(processed_image)
@@ -511,12 +504,14 @@ impl ImageDeduper {
 
     /// Helper function to process a single image
     fn process_single_image(
+        &self,
         img: &types::ImageFile,
         conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
     ) -> Result<types::ProcessedImage> {
         // Process the image
         let chash = processing::compute_cryptographic(&img.path)?;
-        let phash = processing::phash_from_file(&img.path)?;
+        // Use GPU acceleration based on config
+        let phash = processing::gpu_phash_from_file(&self.config, &img.path)?;
 
         let processed_image = types::ProcessedImage {
             original: Arc::new(img.clone()),
@@ -538,7 +533,7 @@ impl ImageDeduper {
     }
     
     /// Process image without using the database - use for fallback when DB access fails
-    fn process_image_without_db(img: &types::ImageFile) -> Result<types::ProcessedImage> {
+    fn process_image_without_db(&self, img: &types::ImageFile) -> Result<types::ProcessedImage> {
         // Log that we're processing without DB
         debug!("Processing {} without database access", img.path.display());
         
@@ -546,7 +541,8 @@ impl ImageDeduper {
         let start = std::time::Instant::now();
         
         let chash = processing::compute_cryptographic(&img.path)?;
-        let phash = processing::phash_from_file(&img.path)?;
+        // Use GPU acceleration based on config
+        let phash = processing::gpu_phash_from_file(&self.config, &img.path)?;
 
         let processed_image = types::ProcessedImage {
             original: Arc::new(img.clone()),
@@ -611,6 +607,12 @@ impl ImageDeduper {
     
     /// Verify database integrity after processing
     fn verify_database_integrity(&self) -> Result<()> {
+        // Skip database operations if shutdown has been requested
+        if self.is_shutdown_requested() {
+            info!("Skipping database integrity checks due to shutdown request");
+            return Ok(());
+        }
+    
         if !self.config.use_database {
             return Ok(());
         }
@@ -624,10 +626,20 @@ impl ImageDeduper {
         
         // Create direct connection to the database
         if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+            // Check for shutdown again before any operations
+            if self.is_shutdown_requested() {
+                return Ok(());
+            }
+            
             // Run PRAGMA wal_checkpoint to ensure all WAL changes are in the main database
-            match conn.query_row("PRAGMA wal_checkpoint(FULL)", [], |_| { Ok(()) }) {
+            match conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| { Ok(()) }) {
                 Ok(_) => info!("WAL checkpoint completed successfully"),
                 Err(e) => warn!("Failed to checkpoint WAL: {}", e)
+            }
+            
+            // Check for shutdown again before next operation
+            if self.is_shutdown_requested() {
+                return Ok(());
             }
             
             // Run integrity check
@@ -647,10 +659,14 @@ impl ImageDeduper {
                 }
             }
             
-            // Run VACUUM to compact the database
-            match conn.execute_batch("VACUUM") {
-                Ok(_) => info!("Database vacuumed successfully"),
-                Err(e) => warn!("Failed to vacuum database: {}", e)
+            // Skip VACUUM if shutdown requested - it's a dangerous operation during shutdown
+            if !self.is_shutdown_requested() {
+                match conn.execute_batch("VACUUM") {
+                    Ok(_) => info!("Database vacuumed successfully"),
+                    Err(e) => warn!("Failed to vacuum database: {}", e)
+                }
+            } else {
+                info!("Skipping database VACUUM due to shutdown request");
             }
         } else {
             warn!("Could not connect to database for final integrity check");

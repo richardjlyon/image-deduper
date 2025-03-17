@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::processing::PHash;
+use crate::processing::perceptual::PHash;
 
 /// Supported image formats
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
