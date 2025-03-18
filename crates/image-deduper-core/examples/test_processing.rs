@@ -72,8 +72,8 @@ fn run_app() -> Result<()> {
     println!("Found {} images", images.len());
 
     println!("Processing images...");
-    let processed_images = deduper.process_images(images, false)?;
-    println!("Processed {} images", processed_images.len());
+    let processed_images = deduper.process_images(&images, false)?;
+    // println!("Processed {} images", processed_images.len());
 
     Ok(())
 }

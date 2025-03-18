@@ -74,3 +74,100 @@ pub fn check_hashes(db: &DB, path: &std::path::PathBuf) -> Result<bool> {
 
     Ok(c_exists && p_exists)
 }
+
+/// Diagnose the database for inconsistencies
+pub fn diagnose_database(db: &DB) -> Result<()> {
+    let mut pc_keys = 0;
+    let mut pp_keys = 0;
+    let mut other_keys = 0;
+    let mut inconsistent_paths = Vec::new();
+    let mut path_to_hashes: std::collections::HashMap<String, (bool, bool)> =
+        std::collections::HashMap::new();
+
+    // Count all types of keys and collect paths
+    let iter = db.iterator(rocksdb::IteratorMode::Start);
+    for result in iter {
+        if let Ok((key, _value)) = result {
+            if let Ok(key_str) = std::str::from_utf8(&key) {
+                if key_str.starts_with("pc:") {
+                    pc_keys += 1;
+                    let path = key_str[3..].to_string();
+                    path_to_hashes
+                        .entry(path.clone())
+                        .and_modify(|(c, _)| *c = true)
+                        .or_insert((true, false));
+                } else if key_str.starts_with("pp:") {
+                    pp_keys += 1;
+                    let path = key_str[3..].to_string();
+                    path_to_hashes
+                        .entry(path.clone())
+                        .and_modify(|(_, p)| *p = true)
+                        .or_insert((false, true));
+                } else {
+                    other_keys += 1;
+                }
+            }
+        }
+    }
+
+    // Find inconsistent paths
+    for (path, (has_c, has_p)) in &path_to_hashes {
+        if *has_c != *has_p {
+            inconsistent_paths.push((path.clone(), *has_c, *has_p));
+        }
+    }
+
+    log::info!("Database diagnosis:");
+    log::info!("- Path->Cryptographic keys (pc:): {}", pc_keys);
+    log::info!("- Path->Perceptual keys (pp:): {}", pp_keys);
+    log::info!("- Other keys: {}", other_keys);
+    log::info!("- Total unique paths: {}", path_to_hashes.len());
+    log::info!("- Inconsistent paths: {}", inconsistent_paths.len());
+
+    // Print details about inconsistent paths
+    if !inconsistent_paths.is_empty() {
+        log::info!("Inconsistent paths details:");
+        for (path, has_c, has_p) in
+            &inconsistent_paths[0..std::cmp::min(5, inconsistent_paths.len())]
+        {
+            log::info!("  - Path: {}, Has C: {}, Has P: {}", path, has_c, has_p);
+        }
+        if inconsistent_paths.len() > 5 {
+            log::info!("  - ... and {} more", inconsistent_paths.len() - 5);
+        }
+    }
+
+    // Cleanup inconsistent records if needed
+    if !inconsistent_paths.is_empty() {
+        log::info!(
+            "Cleaning up {} inconsistent records",
+            inconsistent_paths.len()
+        );
+        let mut batch = rocksdb::WriteBatch::default();
+
+        for (path, has_c, has_p) in inconsistent_paths {
+            // Remove all related entries
+            if has_c {
+                batch.delete(format!("pc:{}", path).as_bytes());
+                // Also remove the corresponding reverse mapping if it exists
+                if let Ok(Some(hash_bytes)) = db.get(format!("pc:{}", path).as_bytes()) {
+                    let c_key = [b"c:".to_vec(), hash_bytes.to_vec()].concat();
+                    batch.delete(&c_key);
+                }
+            }
+            if has_p {
+                batch.delete(format!("pp:{}", path).as_bytes());
+                // Also remove the corresponding reverse mapping if it exists
+                if let Ok(Some(hash_bytes)) = db.get(format!("pp:{}", path).as_bytes()) {
+                    let p_key = [b"p:".to_vec(), hash_bytes.to_vec()].concat();
+                    batch.delete(&p_key);
+                }
+            }
+        }
+
+        db.write(batch)?;
+        log::info!("Cleanup complete");
+    }
+
+    Ok(())
+}
