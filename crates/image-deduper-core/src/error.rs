@@ -1,64 +1,36 @@
 use std::path::PathBuf;
+use thiserror::Error;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
 /// Custom error types for the image-deduper library
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// I/O operation error
-    Io(std::io::Error),
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
 
     /// Image processing error
-    Image(image::ImageError),
+    #[error("Image processing error: {0}")]
+    Image(#[from] image::ImageError),
 
     /// File not found error
+    #[error("File not found: {0}")]
     FileNotFound(PathBuf),
 
     /// Invalid configuration error
+    #[error("Invalid configuration: {0}")]
     Configuration(String),
 
     /// Safety check failure
+    #[error("Safety check failed: {0}")]
     SafetyCheck(String),
 
     /// Unsupported image format
+    #[error("Unsupported image format: {0}")]
     UnsupportedFormat(String),
 
     /// Unknown error
+    #[error("Unknown error: {0}")]
     Unknown(String),
-}
-
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Self {
-        Error::Io(err)
-    }
-}
-
-impl From<image::ImageError> for Error {
-    fn from(err: image::ImageError) -> Self {
-        Error::Image(err)
-    }
-}
-
-impl core::fmt::Display for Error {
-    fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::result::Result<(), core::fmt::Error> {
-        match self {
-            Error::Io(err) => write!(fmt, "I/O error: {}", err),
-            Error::Image(err) => write!(fmt, "Image processing error: {}", err),
-            Error::FileNotFound(path) => write!(fmt, "File not found: {}", path.display()),
-            Error::Configuration(msg) => write!(fmt, "Invalid configuration: {}", msg),
-            Error::SafetyCheck(msg) => write!(fmt, "Safety check failed: {}", msg),
-            Error::UnsupportedFormat(msg) => write!(fmt, "Unsupported image format: {}", msg),
-            Error::Unknown(msg) => write!(fmt, "Unknown error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::Io(err) => Some(err),
-            Error::Image(err) => Some(err),
-            _ => None,
-        }
-    }
 }

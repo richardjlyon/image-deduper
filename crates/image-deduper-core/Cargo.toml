@@ -10,8 +10,7 @@ description = "Core library for detecting and managing duplicate images"
 [dependencies]
 
 # Error handling
-derive_more = { version = "2.0.1", features = ["from"] }
-anyhow = { workspace = true }
+thiserror.workspace = true
 
 # File handling and traversal
 walkdir.workspace = true
@@ -32,23 +31,17 @@ serde.workspace = true
 serde_json.workspace = true
 
 # Database
-rusqlite = { version = "0.30", features = ["bundled"] }
-r2d2 = "0.8"
-r2d2_sqlite = "0.23"
+rocksdb = "0.21.0"
 
 # Concurrency and async
 crossbeam.workspace = true
 rayon.workspace = true
 num_cpus = "1.16"
 ctrlc = "3.4.1"
-once_cell = "1.19.0"   # For lazy initialization
+once_cell = "1.19.0"       # For lazy initialization
 
 # Progress bars
 indicatif = "0.17"
-
-# HTTP client and async runtime (for examples)
-tokio = { version = "1.36", features = ["full"] }
-reqwest = { version = "0.11", features = ["blocking"] }
 
 # Logging
 log.workspace = true

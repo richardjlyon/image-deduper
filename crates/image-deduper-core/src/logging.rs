@@ -1,6 +1,6 @@
+use crate::error::{Error, Result};
 use log::{error, info, LevelFilter};
 use std::path::Path;
-
 // For file-based logging with rotation
 use log4rs::append::rolling_file::policy::compound::roll::fixed_window::FixedWindowRoller;
 use log4rs::append::rolling_file::policy::compound::trigger::size::SizeTrigger;
@@ -11,7 +11,7 @@ use log4rs::encode::pattern::PatternEncoder;
 
 /// Initialize the logger with timestamp, log level, and module path
 /// Logs will be written to file only to avoid interfering with progress bars
-pub fn init_logger(log_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub fn init_logger(log_dir: &str) -> Result<()> {
     // Create log directory if it doesn't exist
     std::fs::create_dir_all(log_dir)?;
 
@@ -24,7 +24,7 @@ pub fn init_logger(log_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Keep 5 archived log files
     let file_roller = FixedWindowRoller::builder()
         .build(&archived_logs_pattern, 5)
-        .map_err(|e| format!("Failed to create log roller: {}", e))?;
+        .map_err(|e| Error::Unknown(format!("Failed to create log roller: {}", e)))?;
 
     // Combine trigger and roller into a compound policy
     let compound_policy = CompoundPolicy::new(Box::new(file_trigger), Box::new(file_roller));
@@ -35,7 +35,7 @@ pub fn init_logger(log_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
             "{d(%Y-%m-%d %H:%M:%S)} [{l}] [{M}:{L}] - {m}{n}",
         )))
         .build(log_file_path.clone(), Box::new(compound_policy))
-        .map_err(|e| format!("Failed to create log appender: {}", e))?;
+        .map_err(|e| Error::Unknown(format!("Failed to create log appender: {}", e)))?;
 
     // Build the logger configuration - file only, no console output
     let config = Config::builder()
@@ -43,10 +43,11 @@ pub fn init_logger(log_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
         .build(
             Root::builder().appender("file").build(LevelFilter::Info), // Default log level
         )
-        .map_err(|e| format!("Failed to build log config: {}", e))?;
+        .map_err(|e| Error::Unknown(format!("Failed to build log config: {}", e)))?;
 
     // Use the configured logger
-    log4rs::init_config(config).map_err(|e| format!("Failed to initialize log4rs: {}", e))?;
+    log4rs::init_config(config)
+        .map_err(|e| Error::Unknown(format!("Failed to initialize log4rs: {}", e)))?;
 
     let env_filter = std::env::var("DEDUP_LOG").unwrap_or_else(|_| "info".to_string());
 
