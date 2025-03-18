@@ -37,27 +37,27 @@ pub fn init_logger(log_dir: &str) -> Result<()> {
         .build(log_file_path.clone(), Box::new(compound_policy))
         .map_err(|e| Error::Unknown(format!("Failed to create log appender: {}", e)))?;
 
+    // Get log level from environment or default to info
+    let env_filter = std::env::var("DEDUP_LOG").unwrap_or_else(|_| "debug".to_string());
+    let level = env_filter
+        .parse::<LevelFilter>()
+        .unwrap_or(LevelFilter::Info);
+
     // Build the logger configuration - file only, no console output
     let config = Config::builder()
         .appender(Appender::builder().build("file", Box::new(rolling_file)))
-        .build(
-            Root::builder().appender("file").build(LevelFilter::Info), // Default log level
-        )
+        .build(Root::builder().appender("file").build(level))
         .map_err(|e| Error::Unknown(format!("Failed to build log config: {}", e)))?;
 
     // Use the configured logger
     log4rs::init_config(config)
         .map_err(|e| Error::Unknown(format!("Failed to initialize log4rs: {}", e)))?;
 
-    let env_filter = std::env::var("DEDUP_LOG").unwrap_or_else(|_| "info".to_string());
-
-    // Apply environment variable-based filter if provided
-    if let Ok(level) = env_filter.parse::<LevelFilter>() {
-        log::set_max_level(level);
-    }
+    // Set the max level for the log crate as well
+    log::set_max_level(level);
 
     info!("Image deduplication application started");
-    info!("Logging to file: {}", log_file_path);
+    info!("Logging to file: {} with level: {}", log_file_path, level);
     Ok(())
 }
 
@@ -93,4 +93,26 @@ pub fn log_fs_modification(operation: &str, path: &Path, details: Option<&str>) 
             format!(", Details: {}", details_str)
         }
     );
+
+    // Create a direct file log entry as well to ensure something is recorded
+    let log_msg = format!(
+        "{} - FS CHANGE - Operation: {}, Path: {}{}\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+        operation,
+        path.display(),
+        if details_str.is_empty() {
+            "".to_string()
+        } else {
+            format!(", Details: {}", details_str)
+        }
+    );
+
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("./direct_logs/backup_log.txt")
+    {
+        use std::io::Write;
+        let _ = file.write_all(log_msg.as_bytes());
+    }
 }

@@ -10,6 +10,10 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// Database error
+    #[error("Database error: {0}")]
+    Database(#[from] rocksdb::Error),
+
     /// Image processing error
     #[error("Image processing error: {0}")]
     Image(#[from] image::ImageError),

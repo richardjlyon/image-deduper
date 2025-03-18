@@ -1,3 +1,4 @@
+/// Demonstrates the discovery of images in a directory.
 use std::path::PathBuf;
 
 use image_deduper_core::logging;
@@ -5,9 +6,7 @@ use image_deduper_core::Config;
 use image_deduper_core::ImageDeduper;
 use image_deduper_core::LogLevel;
 use image_deduper_core::PriorityRule;
-/// Demonstrates the discovery of images in a directory.
 use image_deduper_core::Result;
-use log::info;
 
 fn main() -> Result<()> {
     // Print informative message to user
