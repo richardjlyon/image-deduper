@@ -1,7 +1,9 @@
 /// Demonstrates the processing of images in a directory.
 use std::path::PathBuf;
 
+use image_deduper_core::get_project_root;
 use image_deduper_core::logging;
+use image_deduper_core::persistence;
 use image_deduper_core::Config;
 use image_deduper_core::ImageDeduper;
 use image_deduper_core::LogLevel;
@@ -9,8 +11,8 @@ use image_deduper_core::PriorityRule;
 use image_deduper_core::Result;
 
 fn main() -> Result<()> {
-    let project_dir = std::env::current_dir()?;
-    let log_dir = project_dir.join("logs");
+    let log_dir = get_project_root().join("logs");
+
     logging::init_logger(log_dir.to_str().unwrap())?;
     println!("Logging to {}", log_dir.to_str().unwrap());
 
@@ -67,13 +69,33 @@ fn run_app() -> Result<()> {
 
     let deduper = ImageDeduper::new(config);
 
+    // Get and display database statistics
+    let (pc_count, pp_count) = deduper.get_db_stats()?;
+    println!("Current database contents:");
+    println!("  - Cryptographic hashes: {}", pc_count);
+    println!("  - Perceptual hashes: {}", pp_count);
+    println!("  - Total unique images: {}", pc_count);
+    println!();
+
     println!("Discovering images...");
-    let images = deduper.discover_images(&[PathBuf::from("/Volumes/SamsungT9/Mylio_22c15a")])?;
+    let mut images =
+        deduper.discover_images(&[PathBuf::from("/Volumes/SamsungT9/Mylio_22c15a")])?;
     println!("Found {} images", images.len());
 
+    // sort images by size
+    images.sort_by_key(|image| std::cmp::Reverse(image.size));
+    println!("Sorted images by size (largest to smallest)");
+
     println!("Processing images...");
-    let processed_images = deduper.process_images(&images, false)?;
-    // println!("Processed {} images", processed_images.len());
+    let _ = deduper.process_images(&images, false)?;
+
+    // Display final database statistics
+    let (final_pc_count, final_pp_count) = deduper.get_db_stats()?;
+    println!("\nFinal database contents:");
+    println!("  - Cryptographic hashes: {}", final_pc_count);
+    println!("  - Perceptual hashes: {}", final_pp_count);
+    println!("  - Total unique images: {}", final_pc_count);
+    println!("  - New images added: {}", final_pc_count - pc_count);
 
     Ok(())
 }

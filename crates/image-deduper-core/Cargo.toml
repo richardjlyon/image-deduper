@@ -1,7 +1,7 @@
 [package]
 name = "image-deduper-core"
-version.workspace = true
-edition.workspace = true
+version = "0.1.0"
+edition = "2021"
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -10,32 +10,33 @@ description = "Core library for detecting and managing duplicate images"
 [dependencies]
 
 # Error handling
-thiserror.workspace = true
+thiserror = "1.0"
 
 # File handling and traversal
-walkdir.workspace = true
+walkdir = "2.4"
+dirs = "5.0"
 
 # Image processing
 libheif-rs.workspace = true
-image.workspace = true
+image = { version = "0.24", features = ["png", "jpeg", "gif", "webp"] }
 metal = "0.27.0"
 objc = "0.2.7"
 
 # Hashing
-blake3.workspace = true
+blake3 = "1.5"
 rustdct = "0.7.1"
 ndarray = "0.16.1"
 
 # Serialization
-serde.workspace = true
-serde_json.workspace = true
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # Database
-rocksdb = "0.21.0"
+rocksdb = "0.21"
 
 # Concurrency and async
 crossbeam.workspace = true
-rayon.workspace = true
+rayon = "1.8"
 num_cpus = "1.16"
 ctrlc = "3.4.1"
 once_cell = "1.19.0"       # For lazy initialization
@@ -44,10 +45,14 @@ once_cell = "1.19.0"       # For lazy initialization
 indicatif = "0.17"
 
 # Logging
-log.workspace = true
+log = "0.4"
 env_logger.workspace = true
 chrono = "0.4.40"
 log4rs = "1.3.0"
+tracy-client = { version = "0.18.0", features = ["enable"] }
+
+# Platform-specific information
+sysinfo = "0.30"
 
 [dev-dependencies]
 image.workspace = true

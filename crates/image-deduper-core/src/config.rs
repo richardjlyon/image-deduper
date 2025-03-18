@@ -82,7 +82,7 @@ pub struct Config {
 
     /// Directories to exclude from image scanning
     pub excluded_directories: Vec<PathBuf>,
-    
+
     /// Whether to use GPU acceleration for perceptual hashing (if available)
     /// Currently disabled in implementation due to performance considerations
     /// (CPU implementation is faster than GPU in benchmarks)
@@ -108,7 +108,7 @@ impl Default for Config {
                 PriorityRule::OldestCreationDate,
             ],
             use_database: true,
-            database_path: Some(PathBuf::from("image-deduper.db")),
+            database_path: Some(PathBuf::from("image_hash_db")),
             batch_size: Some(100),
             log_level: LogLevel::Info,
             excluded_directories: Vec::new(),
