@@ -1,52 +1,3 @@
-//! # Perceptual Hashing Module
-//!
-//! This module provides efficient implementations of perceptual hashing algorithms
-//! for image comparison and similarity detection.
-//!
-//! ## Overview
-//!
-//! Perceptual hashing generates "fingerprints" that remain similar for visually similar images,
-//! unlike cryptographic hashes where minor changes produce completely different outputs.
-//!
-//! This implementation offers three methods with different speed/accuracy tradeoffs:
-//!
-//! 1. Original pHash: DCT-based perceptual hash (slowest but most accurate)
-//! 2. Optimized pHash: Direct 8×8 downsampling with grayscale conversion (good balance)
-//! 3. Ultra-fast pHash: Strategic sampling without resizing (fastest but less accurate)
-//!
-//! ## Hamming Distance Interpretation
-//!
-//! The similarity between two images is measured using Hamming distance (count of differing bits):
-//!
-//! - 0-3: Nearly identical images (same image with minor modifications)
-//! - 4-10: Similar images (same subject with moderate differences)
-//! - >10-15: Different images
-//!
-//! ## Implementation Details
-//!
-//! - All methods produce a 64-bit hash
-//! - The ultra-fast method typically has a Hamming distance of ~13 from the original method
-//! - This represents about 20% difference while being significantly faster
-//!
-//! ## Usage Guidance
-//!
-//! - For exact duplicate detection: Use the original or optimized method
-//! - For near-duplicate detection: The optimized method offers a good balance
-//! - For similarity searching: The ultra-fast method is appropriate when speed is critical
-//! - Consider a hybrid approach: Screen with ultra-fast, then verify with optimized method
-//!
-//! ## Performance
-//!
-//! Approximate processing times for a 4000×4000 image:
-//! - Original DCT-based method: ~8 seconds
-//! - Optimized direct method: ~4ms
-//! - Ultra-fast sampling method: ~8us
-//!
-//! ## References
-//!
-//! - "Implementation and analysis of DCT based global perceptual image hashing" by Bian Yang, et al.
-//! - "Perceptual Hashing: Robust Image Identification" by Nasir Memon and Savvas A. Chatzichristofis
-
 use image::{DynamicImage, GenericImageView};
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -286,21 +237,41 @@ pub fn ultra_fast_phash(img: &DynamicImage) -> PHash {
     PHash::Standard(hash)
 }
 
-/// Process TIFF files with advanced strategies to handle large/problematic TIFFs
-/// Uses a multi-stage approach similar to RAW file handling
+/// Process TIFF files with simple size check and direct load approach
 fn process_tiff_with_fallback<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
-    use std::hash::{Hash, Hasher};
-    
     let path_ref = path.as_ref();
     
-    // Stage 1: First try direct loading with downscaling during load
+    // Check file size first - skip processing for large TIFF files
+    const TIFF_SIZE_LIMIT: u64 = 100_000_000; // 100 MB limit
+    
+    if let Ok(metadata) = std::fs::metadata(path_ref) {
+        let file_size = metadata.len();
+        
+        if file_size > TIFF_SIZE_LIMIT {
+            // For large TIFF files, just log and return error
+            let size_mb = file_size / 1_000_000;
+            log::warn!("Skipping large TIFF file ({}MB > 100MB limit): {}", 
+                     size_mb, path_ref.display());
+            
+            return Err(image::ImageError::Unsupported(
+                image::error::UnsupportedError::from_format_and_kind(
+                    image::error::ImageFormatHint::Name("TIFF".to_string()),
+                    image::error::UnsupportedErrorKind::GenericFeature(
+                        format!("File exceeds size limit ({}MB)", size_mb)
+                    )
+                )
+            ));
+        }
+    }
+    
+    // For normal-sized TIFFs, try direct loading with downscaling
     let result = process_tiff_with_downscaling(path_ref);
     if result.is_ok() {
         return result;
     }
     
     // If direct loading failed, log the failure
-    log::info!("Direct TIFF loading failed for {}, trying alternate methods", path_ref.display());
+    log::info!("TIFF processing failed for {}", path_ref.display());
     
     // Stage 2: Try macOS tools if available (highly optimized for TIFF handling)
     // Static check for tools to avoid repeated checks
@@ -328,24 +299,6 @@ fn process_tiff_with_fallback<P: AsRef<Path>>(path: P) -> Result<PHash, image::I
         let random_name = format!("tiff_{}.jpg", timestamp);
         let temp_path = temp_dir.join(random_name);
 
-        // Check file size to determine how aggressive we need to be
-        let size_based_settings = if let Ok(metadata) = std::fs::metadata(path_ref) {
-            let file_size = metadata.len();
-            if file_size > 300_000_000 { // 300MB+
-                // Extreme downscaling for very large files
-                ("-Z", "256")
-            } else if file_size > 100_000_000 { // 100MB+
-                // Strong downscaling for large files
-                ("-Z", "384")
-            } else {
-                // Moderate downscaling for regular files
-                ("-Z", "512") 
-            }
-        } else {
-            // Default if we can't get the size
-            ("-Z", "512")
-        };
-
         // Try to convert using sips with optimized settings for speed
         let output = Command::new("sips")
             .arg("-s")
@@ -357,8 +310,8 @@ fn process_tiff_with_fallback<P: AsRef<Path>>(path: P) -> Result<PHash, image::I
             .arg("-s")
             .arg("dpiWidth")
             .arg("72")
-            .arg(size_based_settings.0)
-            .arg(size_based_settings.1) // Size based on file size
+            .arg("-Z")
+            .arg("512") // Moderate target size
             .arg(path_ref.as_os_str())
             .arg("--out")
             .arg(&temp_path)
@@ -412,189 +365,161 @@ fn process_tiff_with_fallback<P: AsRef<Path>>(path: P) -> Result<PHash, image::I
 
 /// Specialized function for directly processing TIFF files with optimized downscaling
 /// This approach attempts to load the TIFF file at a lower resolution directly
+/// Note: This function is only called for TIFF files under 100MB due to the size limit in process_tiff_with_fallback
 fn process_tiff_with_downscaling<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
     let path_ref = path.as_ref();
     
-    // First try to get file size to decide on strategy
-    if let Ok(metadata) = std::fs::metadata(path_ref) {
-        let file_size = metadata.len();
-        
-        // For very large TIFFs (over 100MB), use even more aggressive downscaling
-        if file_size > 100_000_000 {
-            log::info!("Processing very large TIFF ({}MB) with aggressive downscaling: {}", 
-                      file_size / 1_000_000, path_ref.display());
-                      
-            // Try loading the image with special downscaling options
-            if let Ok(reader) = image::io::Reader::open(path_ref) {
-                // Try to guess the format
-                if let Some(format) = reader.format() {
-                    if format == image::ImageFormat::Tiff {
-                        // The TIFF decoder has limits on maximum memory usage
-                        // By limiting dimensions, we significantly reduce memory usage
+    // Try to load the image with standard approach
+    if let Ok(reader) = image::io::Reader::open(path_ref) {
+        if let Some(format) = reader.format() {
+            if format == image::ImageFormat::Tiff {
+                return match reader.with_guessed_format() {
+                    Ok(reader) => {
+                        log::info!("Loading TIFF at reduced resolution: {}", path_ref.display());
                         
-                        // Try to estimate dimensions before full decode 
-                        // (TIFF headers usually contain this information)
-                        return match reader.with_guessed_format() {
-                            Ok(reader) => {
-                                log::info!("Loading TIFF at reduced resolution: {}", path_ref.display());
+                        match reader.decode() {
+                            Ok(img) => {
+                                let (width, height) = img.dimensions();
+                                log::info!("Successfully loaded TIFF {}x{}, resizing for hash", width, height);
                                 
-                                // Try to load the image and immediately resize it
-                                match reader.decode() {
-                                    Ok(img) => {
-                                        let (width, height) = img.dimensions();
-                                        log::info!("Successfully loaded TIFF {}x{}, resizing for hash", width, height);
+                                // Standard resize to 512px max for efficient processing
+                                let resized = if width > 512 || height > 512 {
+                                    if width > height {
+                                        let scale = 512.0 / width as f32;
+                                        img.resize(512, (height as f32 * scale).round() as u32, 
+                                                image::imageops::FilterType::Triangle)
+                                    } else {
+                                        let scale = 512.0 / height as f32;
+                                        img.resize((width as f32 * scale).round() as u32, 512, 
+                                                image::imageops::FilterType::Triangle)
+                                    }
+                                } else {
+                                    img
+                                };
+                                
+                                Ok(calculate_phash(&resized))
+                            },
+                            Err(e) => {
+                                // Check if error is memory related
+                                let err_str = e.to_string();
+                                if err_str.contains("Memory limit exceeded") || 
+                                   err_str.contains("Memory") ||  // More general case 
+                                   err_str.contains("memory") || 
+                                   err_str.contains("allocation") ||
+                                   err_str.contains("resource") ||  // Resource exhaustion errors
+                                   err_str.contains("out of memory") ||  // Explicit OOM errors
+                                   err_str.contains("limit") ||  // Various limit-related errors
+                                   err_str.contains("exhausted") ||  // Resource exhaustion
+                                   err_str.contains("exceeded") {  // Various exceeded limits
+                                    
+                                    log::error!("Memory limit exceeded when processing TIFF: {}", path_ref.display());
+                                    
+                                    // For memory errors, try with even more aggressive settings
+                                    // Use sips on macOS as it's highly optimized for memory usage
+                                    if cfg!(target_os = "macos") {
+                                        // Try to convert using sips for memory-efficient processing
+                                        let temp_dir = std::env::temp_dir();
+                                        let timestamp = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_millis();
+                                        let random_name = format!("tiff_mem_error_{}.jpg", timestamp);
+                                        let temp_path = temp_dir.join(random_name);
                                         
-                                        // Aggressively resize large images to 512px max
-                                        let resized = if width > 512 || height > 512 {
-                                            if width > height {
-                                                let scale = 512.0 / width as f32;
-                                                img.resize(512, (height as f32 * scale).round() as u32, 
-                                                        image::imageops::FilterType::Triangle)
-                                            } else {
-                                                let scale = 512.0 / height as f32;
-                                                img.resize((width as f32 * scale).round() as u32, 512, 
-                                                        image::imageops::FilterType::Triangle)
-                                            }
-                                        } else {
-                                            img
-                                        };
+                                        log::info!("Attempting ultra memory-efficient conversion for: {}", path_ref.display());
                                         
-                                        Ok(calculate_phash(&resized))
-                                    },
-                                    Err(e) => {
-                                        // Check if error is memory related
-                                        let err_str = e.to_string();
-                                        if err_str.contains("Memory limit exceeded") || 
-                                           err_str.contains("memory") || 
-                                           err_str.contains("allocation") {
+                                        // Use aggressive settings to minimize memory usage
+                                        let output = std::process::Command::new("sips")
+                                            .arg("-s")
+                                            .arg("format")
+                                            .arg("jpeg")
+                                            .arg("-Z")
+                                            .arg("256") // Small target size for memory issues
+                                            .arg(path_ref.as_os_str())
+                                            .arg("--out")
+                                            .arg(&temp_path)
+                                            .output();
                                             
-                                            log::error!("Memory limit exceeded when processing TIFF: {}", path_ref.display());
-                                            
-                                            // For memory errors, try with even more aggressive settings
-                                            // Use sips on macOS as it's highly optimized for memory usage
-                                            if cfg!(target_os = "macos") {
-                                                // Try to convert using sips for memory-efficient processing
-                                                let temp_dir = std::env::temp_dir();
-                                                let timestamp = std::time::SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .unwrap_or_default()
-                                                    .as_millis();
-                                                let random_name = format!("tiff_mem_error_{}.jpg", timestamp);
-                                                let temp_path = temp_dir.join(random_name);
+                                        match output {
+                                            Ok(output) if output.status.success() && temp_path.exists() => {
+                                                if let Ok(img) = image::open(&temp_path) {
+                                                    let result = calculate_phash(&img);
+                                                    let _ = std::fs::remove_file(&temp_path);
+                                                    log::info!("Successfully processed memory-intensive TIFF using external tools: {}", 
+                                                        path_ref.display());
+                                                    return Ok(result);
+                                                }
+                                                // Clean up temp file
+                                                let _ = std::fs::remove_file(&temp_path);
+                                            },
+                                            Ok(output) => {
+                                                // Log specific sips error for diagnosis
+                                                if !output.status.success() {
+                                                    let stderr = String::from_utf8_lossy(&output.stderr);
+                                                    let stdout = String::from_utf8_lossy(&output.stdout);
+                                                    log::error!("sips failed for TIFF {}: status={}, stderr={}, stdout={}", 
+                                                        path_ref.display(), output.status, stderr, stdout);
+                                                } else {
+                                                    log::error!("sips conversion completed but temp file not created for TIFF: {}", 
+                                                        path_ref.display());
+                                                }
                                                 
-                                                log::info!("Attempting memory-efficient conversion for: {}", path_ref.display());
+                                                // Clean up temp file if it exists
+                                                if temp_path.exists() {
+                                                    let _ = std::fs::remove_file(&temp_path);
+                                                }
+                                            },
+                                            Err(e) => {
+                                                // Log specific OS error for diagnosis
+                                                log::error!("sips process failed for TIFF {}: {}", path_ref.display(), e);
                                                 
-                                                // Use very aggressive settings to minimize memory usage
-                                                let output = std::process::Command::new("sips")
-                                                    .arg("-s")
-                                                    .arg("format")
-                                                    .arg("jpeg")
-                                                    .arg("-Z")
-                                                    .arg("256") // Use much smaller target size for memory issues
-                                                    .arg(path_ref.as_os_str())
-                                                    .arg("--out")
-                                                    .arg(&temp_path)
-                                                    .output();
-                                                
-                                                match output {
-                                                    Ok(output) if output.status.success() && temp_path.exists() => {
-                                                        if let Ok(img) = image::open(&temp_path) {
-                                                            let result = calculate_phash(&img);
-                                                            let _ = std::fs::remove_file(&temp_path);
-                                                            log::info!("Successfully processed memory-intensive TIFF using external tools: {}", 
-                                                                path_ref.display());
-                                                            return Ok(result);
-                                                        }
-                                                        // Clean up temp file
-                                                        let _ = std::fs::remove_file(&temp_path);
-                                                    },
-                                                    _ => {
-                                                        // Fall through to error if external tools fail
-                                                        if temp_path.exists() {
-                                                            let _ = std::fs::remove_file(&temp_path);
-                                                        }
-                                                    }
+                                                // Clean up temp file if it exists
+                                                if temp_path.exists() {
+                                                    let _ = std::fs::remove_file(&temp_path);
                                                 }
                                             }
                                         }
-                                        
-                                        log::error!("Failed to decode TIFF directly: {}: {}", path_ref.display(), e);
-                                        Err(e)
                                     }
                                 }
-                            },
-                            Err(e) => Err(image::ImageError::IoError(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData, 
-                                format!("Format error: {}", e)
-                            )))
-                        };
-                    }
-                }
-                
-                // Fall back to standard load + resize approach if format detection failed
-                match image::open(path_ref) {
-                    Ok(img) => {
-                        let (width, height) = img.dimensions();
-                        log::info!("Loaded TIFF ({}MB) with dimensions {}x{}, resizing for hashing", 
-                                 file_size / 1_000_000, width, height);
-                        
-                        // Resize to 512px max for large files
-                        let resized = if width > 512 || height > 512 {
-                            if width > height {
-                                let scale = 512.0 / width as f32;
-                                img.resize(512, (height as f32 * scale).round() as u32, 
-                                        image::imageops::FilterType::Triangle)
-                            } else {
-                                let scale = 512.0 / height as f32;
-                                img.resize((width as f32 * scale).round() as u32, 512, 
-                                        image::imageops::FilterType::Triangle)
+                                
+                                log::error!("Failed to decode TIFF directly: {}: {}", path_ref.display(), e);
+                                Err(e)
                             }
-                        } else {
-                            img
-                        };
-                        
-                        Ok(calculate_phash(&resized))
+                        }
                     },
-                    Err(e) => Err(e)
+                    Err(e) => Err(image::ImageError::IoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData, 
+                        format!("Format error: {}", e)
+                    )))
+                };
+            }
+        }
+    }
+    
+    // Standard fallback for any TIFF format detection or loading issues
+    match image::open(path_ref) {
+        Ok(img) => {
+            let (width, height) = img.dimensions();
+            log::info!("Loaded TIFF with dimensions {}x{}, resizing for hashing", width, height);
+            
+            // Resize to 512px max for more efficient processing
+            let resized = if width > 512 || height > 512 {
+                if width > height {
+                    let scale = 512.0 / width as f32;
+                    img.resize(512, (height as f32 * scale).round() as u32, 
+                            image::imageops::FilterType::Triangle)
+                } else {
+                    let scale = 512.0 / height as f32;
+                    img.resize((width as f32 * scale).round() as u32, 512, 
+                            image::imageops::FilterType::Triangle)
                 }
             } else {
-                Err(image::ImageError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "Could not open TIFF file",
-                )))
-            }
-        } else {
-            // For smaller TIFFs, use standard processing with resize
-            match image::open(path_ref) {
-                Ok(img) => {
-                    let (width, height) = img.dimensions();
-                    
-                    // Still resize to 512px max for consistency
-                    let resized = if width > 512 || height > 512 {
-                        if width > height {
-                            let scale = 512.0 / width as f32;
-                            img.resize(512, (height as f32 * scale).round() as u32, 
-                                    image::imageops::FilterType::Triangle)
-                        } else {
-                            let scale = 512.0 / height as f32;
-                            img.resize((width as f32 * scale).round() as u32, 512, 
-                                    image::imageops::FilterType::Triangle)
-                        }
-                    } else {
-                        img
-                    };
-                    
-                    Ok(calculate_phash(&resized))
-                },
-                Err(e) => Err(e)
-            }
-        }
-    } else {
-        // If we can't get metadata, try standard loading
-        match image::open(path_ref) {
-            Ok(img) => Ok(calculate_phash(&img)),
-            Err(e) => Err(e)
-        }
+                img
+            };
+            
+            Ok(calculate_phash(&resized))
+        },
+        Err(e) => Err(e)
     }
 }
 
@@ -611,14 +536,35 @@ pub fn process_tiff_directly<P: AsRef<Path>>(path: P) -> Result<PHash, image::Im
     process_tiff_with_fallback(path)
 }
 
-/// Process RAW image files using a multi-stage approach:
-/// 1. Try to use macOS tools (sips/qlmanage) if available (fast)
-/// 2. Try direct loading with image crate (slower but works for some formats)
-/// 3. Use filename-based hash as a last resort (ensures we always get something)
+/// Process RAW image files after performing a size check
+/// For files under the size limit, try loading via macOS tools or directly
 fn process_raw_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
     let path_ref = path.as_ref();
     
-    // First, try to search for an existing JPEG version or thumbnail of this RAW file
+    // Check file size first - skip processing for large RAW files
+    const RAW_SIZE_LIMIT: u64 = 100_000_000; // 100 MB limit
+    
+    if let Ok(metadata) = std::fs::metadata(path_ref) {
+        let file_size = metadata.len();
+        
+        if file_size > RAW_SIZE_LIMIT {
+            // For large RAW files, just log and return error
+            let size_mb = file_size / 1_000_000;
+            log::warn!("Skipping large RAW file ({}MB > 100MB limit): {}", 
+                     size_mb, path_ref.display());
+            
+            return Err(image::ImageError::Unsupported(
+                image::error::UnsupportedError::from_format_and_kind(
+                    image::error::ImageFormatHint::Name("RAW".to_string()),
+                    image::error::UnsupportedErrorKind::GenericFeature(
+                        format!("File exceeds size limit ({}MB)", size_mb)
+                    )
+                )
+            ));
+        }
+    }
+    
+    // For normal-sized RAW files, try to find paired JPEG first
     // Many camera systems save both RAW+JPEG by default
     if let Some(file_stem) = path_ref.file_stem().and_then(|s| s.to_str()) {
         let parent_dir = path_ref.parent().unwrap_or_else(|| Path::new("."));
@@ -878,14 +824,19 @@ pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErr
                 }
             }
 
-            // CASE 2: Any TIFF errors
+            // CASE 2: Any TIFF errors or memory-related errors
             if error_str.contains("LZW")
                 || error_str.contains("tiff")
                 || error_str.contains("TIFF")
                 || error_str.contains("invalid code")
                 || error_str.contains("memory")
-                || error_str.contains("Memory limit exceeded")
+                || error_str.contains("Memory")  // More general case for "Memory limit exceeded"
                 || error_str.contains("allocation")
+                || error_str.contains("resource")  // Resource exhaustion errors
+                || error_str.contains("out of memory")  // Explicit OOM errors
+                || error_str.contains("limit")   // Various limit-related errors
+                || error_str.contains("exhausted")  // Resource exhaustion
+                || error_str.contains("exceeded")  // Various exceeded limits
             {
                 log::warn!(
                     "Identified TIFF-related error ({}), activating fallback: {}",
@@ -894,25 +845,13 @@ pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErr
                 return process_tiff_with_fallback(path_ref);
             }
 
-            // CASE 3: Last chance fallback for any other errors
-            // Try processing using external tools anyway
+            // CASE 3: If we've gotten here, we can't process the image
             log::warn!(
-                "Unhandled image error, attempting general fallback: {}",
+                "Unhandled image error, giving up on: {}",
                 path_ref.display()
             );
-            match process_tiff_with_fallback(path_ref) {
-                Ok(hash) => {
-                    log::info!(
-                        "Successfully processed with fallback: {}",
-                        path_ref.display()
-                    );
-                    return Ok(hash);
-                }
-                Err(_) => {
-                    // If the fallback also fails, return the original error
-                    return Err(e);
-                }
-            }
+            // Return the original error
+            return Err(e);
         }
     }
 }
@@ -1004,10 +943,17 @@ pub fn enhanced_phash_from_img(img: &DynamicImage) -> PHash {
 /// Process a large image by downscaling it for perceptual hash computation
 /// This allows us to handle very large images efficiently without timeouts
 pub fn process_large_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
-    // Import used for dimensions methods
+    let path_ref = path.as_ref();
+    
+    // Check file size first to determine optimal strategy
+    let file_size = if let Ok(metadata) = std::fs::metadata(path_ref) {
+        metadata.len()
+    } else {
+        0 // Default if we can't get the size
+    };
     
     // First try to efficiently get image dimensions without loading the whole image
-    let reader = image::io::Reader::open(path.as_ref())?;
+    let reader = image::io::Reader::open(path_ref)?;
     let reader = reader.with_guessed_format()?;
     let dimensions = reader.into_dimensions();
     
@@ -1016,26 +962,43 @@ pub fn process_large_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
         // If the image is very large, resize it before computing the hash
         if width > 1024 || height > 1024 {
             log::info!(
-                "Downscaling large image ({}x{}) for perceptual hash computation: {}",
-                width, height, path.as_ref().display()
+                "Downscaling large image ({}x{}, {}MB) for perceptual hash computation: {}",
+                width, height, file_size / 1_000_000, path_ref.display()
+            );
+            
+            // Determine target size and resize filter based on file size
+            let (max_dimension, filter) = if file_size > 300_000_000 {
+                // Extreme optimization for very large files (300MB+)
+                (768, image::imageops::FilterType::Nearest)
+            } else if file_size > 100_000_000 {
+                // Strong optimization for large files (100MB-300MB)
+                (896, image::imageops::FilterType::Triangle)
+            } else {
+                // Standard optimization for moderately large files
+                (1024, image::imageops::FilterType::Lanczos3)
+            };
+            
+            log::info!(
+                "Using file-size optimized parameters: max {}px with {} filter: {}",
+                max_dimension, 
+                if file_size > 300_000_000 { "fastest" } 
+                else if file_size > 100_000_000 { "balanced" } 
+                else { "quality" },
+                path_ref.display()
             );
             
             // Calculate target dimensions maintaining aspect ratio
             let (target_width, target_height) = if width > height {
-                let scale = 1024.0 / width as f32;
-                (1024, (height as f32 * scale).round() as u32)
+                let scale = max_dimension as f32 / width as f32;
+                (max_dimension, (height as f32 * scale).round() as u32)
             } else {
-                let scale = 1024.0 / height as f32;
-                ((width as f32 * scale).round() as u32, 1024)
+                let scale = max_dimension as f32 / height as f32;
+                ((width as f32 * scale).round() as u32, max_dimension)
             };
             
             // Load image and resize it to target dimensions
-            let img = image::open(path.as_ref())?;
-            let resized = img.resize(
-                target_width, 
-                target_height, 
-                image::imageops::FilterType::Lanczos3
-            );
+            let img = image::open(path_ref)?;
+            let resized = img.resize(target_width, target_height, filter);
             
             // Compute hash on resized image
             return Ok(calculate_phash(&resized));
@@ -1043,7 +1006,7 @@ pub fn process_large_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
     }
     
     // For smaller images or if we couldn't determine dimensions, use normal path
-    let img = image::open(path.as_ref())?;
+    let img = image::open(path_ref)?;
     Ok(calculate_phash(&img))
 }
 
