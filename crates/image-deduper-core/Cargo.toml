@@ -53,6 +53,7 @@ tracy-client = { version = "0.18.0", features = ["enable"] }
 
 # Platform-specific information
 sysinfo = "0.30"
+rlimit = "0.10.1"    # For file descriptor limit management
 
 [dev-dependencies]
 image.workspace = true

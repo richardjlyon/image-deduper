@@ -70,10 +70,30 @@ pub struct ImageDeduper {
 impl ImageDeduper {
     /// Create a new ImageDeduper with the provided configuration
     pub fn new(config: Config) -> Self {
+        // Configure Rayon thread pool with fewer threads to prevent resource exhaustion
+        let cpu_count = num_cpus::get();
+        let thread_count = std::cmp::min(cpu_count, 8); // Cap at 8 threads to prevent too many file handles
+        
         rayon::ThreadPoolBuilder::new()
-            .num_threads(num_cpus::get())
+            .num_threads(thread_count)
             .build_global()
             .unwrap();
+            
+        // Attempt to increase file descriptor limit on Unix platforms
+        #[cfg(unix)]
+        {
+            // Try to set higher file limit if possible
+            let _ = Self::increase_file_limit();
+            
+            // Check current limit for logging
+            if let Ok(limits) = rlimit::getrlimit(rlimit::Resource::NOFILE) {
+                log::info!(
+                    "File descriptor limits: current={}, maximum={}",
+                    limits.0, limits.1
+                );
+            }
+        }
+        
         let db = persistence::rocksdb(&config).unwrap();
         let _safety_manager = safety::SafetyManager::new(&config);
         let memory_tracker = Arc::new(MemoryTracker::new());
@@ -84,6 +104,34 @@ impl ImageDeduper {
             _safety_manager,
             _shutdown_requested: Arc::new(AtomicBool::new(false)),
             memory_tracker,
+        }
+    }
+    
+    /// Try to increase the file descriptor limit on Unix systems
+    #[cfg(unix)]
+    fn increase_file_limit() -> std::result::Result<(), String> {
+        // Attempt to raise the file descriptor limit
+        match rlimit::getrlimit(rlimit::Resource::NOFILE) {
+            Ok((soft, hard)) => {
+                // Only try to increase if hard limit is higher than soft limit
+                if hard > soft {
+                    // Try to raise to hard limit or 4096, whichever is lower
+                    let new_soft = std::cmp::min(hard, 4096);
+                    if new_soft > soft {
+                        if let Err(e) = rlimit::setrlimit(rlimit::Resource::NOFILE, new_soft, hard) {
+                            log::warn!("Failed to increase file descriptor limit: {}", e);
+                            return Err(e.to_string());
+                        } else {
+                            log::info!("Increased file descriptor limit from {} to {}", soft, new_soft);
+                        }
+                    }
+                }
+                Ok(())
+            },
+            Err(e) => {
+                log::warn!("Failed to get file descriptor limits: {}", e);
+                Err(e.to_string())
+            }
         }
     }
 
@@ -150,12 +198,12 @@ impl ImageDeduper {
             return Ok(());
         }
 
-        // Choose batch size based on available memory
-        // Smaller batch size for stability, can be increased later for performance
-        const BATCH_SIZE: usize = 50;
+        // Choose a smaller batch size to prevent file handle exhaustion
+        // This helps prevent hitting the "Too many open files" limit
+        const BATCH_SIZE: usize = 30;
 
-        // Create a smaller batch size for more frequent checkpoints
-        let effective_batch_size = std::cmp::min(BATCH_SIZE, 20);
+        // Create a smaller batch size for more frequent checkpoints and better resource management
+        let effective_batch_size = std::cmp::min(BATCH_SIZE, 10);
 
         // Get stats for the progress tracker
         let already_processed = current_db_count;

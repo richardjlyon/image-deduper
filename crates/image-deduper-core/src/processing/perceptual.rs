@@ -658,20 +658,30 @@ pub fn enhanced_phash_from_img(img: &DynamicImage) -> PHash {
 fn is_heic_format<P: AsRef<Path>>(path: P) -> bool {
     use std::io::Read;
 
-    if let Ok(mut file) = std::fs::File::open(path.as_ref()) {
-        let mut buffer = [0; 12];
-        if file.read_exact(&mut buffer).is_ok() {
-            // HEIC/HEIF format signatures
-            if (buffer[4..8] == [b'f', b't', b'y', b'p'])
-                || (buffer[4..8] == [b'h', b'e', b'i', b'c'])
-                || (buffer[4..8] == [b'h', b'e', b'i', b'f'])
-                || (buffer[4..8] == [b'm', b'i', b'f', b'1'])
-            {
-                return true;
+    // Use a block to ensure file is dropped at end of scope
+    let result = {
+        if let Ok(mut file) = std::fs::File::open(path.as_ref()) {
+            let mut buffer = [0; 12];
+            if file.read_exact(&mut buffer).is_ok() {
+                // HEIC/HEIF format signatures
+                if (buffer[4..8] == [b'f', b't', b'y', b'p'])
+                    || (buffer[4..8] == [b'h', b'e', b'i', b'c'])
+                    || (buffer[4..8] == [b'h', b'e', b'i', b'f'])
+                    || (buffer[4..8] == [b'm', b'i', b'f', b'1'])
+                {
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
             }
+        } else {
+            false
         }
-    }
-    false
+    };
+    
+    result
 }
 
 /// Process HEIC image files

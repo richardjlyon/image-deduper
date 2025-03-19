@@ -138,6 +138,12 @@ pub fn process_image_batch(
                 info!("Computing crypto hash for: '{}'", path_display);
                 let crypto_result = std::panic::catch_unwind(|| {
                     use std::thread;
+                    use std::sync::atomic::{AtomicBool, Ordering};
+                    use std::sync::Arc;
+
+                    // Create a cancellation token
+                    let cancel_token = Arc::new(AtomicBool::new(false));
+                    let cancel_token_clone = cancel_token.clone();
 
                     // Spawn a thread to compute the hash with a timeout
                     let path_clone = path.clone();
@@ -145,18 +151,31 @@ pub fn process_image_batch(
 
                     // Compute in a separate thread so we can timeout
                     let handle = thread::spawn(move || {
+                        // Check if we've been asked to cancel before starting
+                        if cancel_token_clone.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        
                         let result = compute_cryptographic(&path_clone);
-                        let _ = tx.send(result);
+                        
+                        // Only send if we haven't been cancelled
+                        if !cancel_token_clone.load(Ordering::SeqCst) {
+                            let _ = tx.send(result);
+                        }
                     });
 
                     // Wait with timeout
                     match rx.recv_timeout(std::time::Duration::from_secs(5)) {
                         Ok(result) => {
-                            // Thread completed within timeout
+                            // Thread completed within timeout - ensure it's joined
+                            let _ = handle.join();
                             result
                         },
                         Err(e) => {
-                            // Timeout occurred, thread is still running
+                            // Timeout occurred, thread is still running - signal cancellation
+                            cancel_token.store(true, Ordering::SeqCst);
+                            
+                            // Log timeout
                             info!("TIMEOUT: Crypto hash took too long for '{}'", path_display);
 
                             // Log the timeout error properly
@@ -177,11 +196,16 @@ pub fn process_image_batch(
                                 std::thread::yield_now(); // Give thread a chance to exit
                             }
 
-                            // Don't block, but don't leak the thread handle either
-                            std::thread::spawn(move || {
-                                // Try to join with a short timeout in a background thread
-                                let _ = handle.join();
-                            });
+                            // Create a cleanup thread with a name for better debugging
+                            let _cleanup_thread = std::thread::Builder::new()
+                                .name("crypto-cleanup".to_string())
+                                .spawn(move || {
+                                    // Try to join with a short timeout in a background thread
+                                    let _ = handle.join();
+                                });
+                                
+                            // Just let the cleanup thread run in the background
+                            // No need to wait for it to complete
 
                             Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "Timeout").into())
                         }
@@ -210,6 +234,12 @@ pub fn process_image_batch(
                     info!("Computing perceptual hash for: '{}'", path_display);
                     std::panic::catch_unwind(|| {
                         use std::thread;
+                        use std::sync::atomic::{AtomicBool, Ordering};
+                        use std::sync::Arc;
+
+                        // Create a cancellation token
+                        let cancel_token = Arc::new(AtomicBool::new(false));
+                        let cancel_token_clone = cancel_token.clone();
 
                         // Spawn a thread to compute the hash with a timeout
                         let path_clone = path.clone();
@@ -217,18 +247,31 @@ pub fn process_image_batch(
 
                         // Compute in a separate thread so we can timeout
                         let handle = thread::spawn(move || {
+                            // Check if we've been asked to cancel before starting
+                            if cancel_token_clone.load(Ordering::SeqCst) {
+                                return;
+                            }
+                            
                             let result = phash_from_file(&path_clone);
-                            let _ = tx.send(result);
+                            
+                            // Only send if we haven't been cancelled
+                            if !cancel_token_clone.load(Ordering::SeqCst) {
+                                let _ = tx.send(result);
+                            }
                         });
 
                         // Wait with timeout
                         match rx.recv_timeout(std::time::Duration::from_secs(10)) {
                             Ok(result) => {
-                                // Thread completed within timeout
+                                // Thread completed within timeout - ensure it's joined
+                                let _ = handle.join();
                                 result
                             },
                             Err(e) => {
-                                // Timeout occurred, thread is still running
+                                // Timeout occurred, thread is still running - signal cancellation
+                                cancel_token.store(true, Ordering::SeqCst);
+                                
+                                // Log timeout
                                 info!("TIMEOUT: Perceptual hash took too long for '{}'", path_display);
 
                                 // Log the timeout error properly
@@ -249,11 +292,16 @@ pub fn process_image_batch(
                                     std::thread::yield_now(); // Give thread a chance to exit
                                 }
 
-                                // Don't block, but don't leak the thread handle either
-                                std::thread::spawn(move || {
-                                    // Try to join with a short timeout in a background thread
-                                    let _ = handle.join();
-                                });
+                                // Create a cleanup thread with a name for better debugging
+                                let _cleanup_thread = std::thread::Builder::new()
+                                    .name("phash-cleanup".to_string())
+                                    .spawn(move || {
+                                        // Try to join with a short timeout in a background thread
+                                        let _ = handle.join();
+                                    });
+                                    
+                                // Just let the cleanup thread run in the background
+                                // No need to wait for it to complete
 
                                 Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "Timeout").into())
                             }
