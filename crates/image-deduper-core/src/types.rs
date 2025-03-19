@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::processing::perceptual::PHash;
 
@@ -124,3 +125,4 @@ pub struct ActionResult {
     /// Optional error message if action failed
     pub error: Option<String>,
 }
+

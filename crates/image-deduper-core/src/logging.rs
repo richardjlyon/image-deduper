@@ -72,7 +72,7 @@ pub fn log_file_error(path: &Path, operation: &str, error: &dyn std::error::Erro
 }
 
 /// Log hash computation error
-pub fn log_hash_error(path: &Path, error: &dyn std::error::Error) {
+pub fn log_hash_error<E: std::fmt::Display>(path: &Path, error: E) {
     error!(
         "Hash computation failed - Path: {}, Error: {}",
         path.display(),
