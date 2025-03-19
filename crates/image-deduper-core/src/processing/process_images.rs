@@ -103,21 +103,14 @@ pub fn process_image_batch(
                             return None;
                         }
 
-                        if file_size > 200_000_000 { // 200MB limit
-                            // Log oversized file
-                            crate::logging::log_file_error(path, "check_size", &std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!("File too large: {}MB", file_size / 1_000_000)
-                            ));
-                            println!("Skipping oversized file ({}MB): '{}'",
-                                    file_size / 1_000_000, path_display);
-
-                            // Increment counters
-                            error_counter.fetch_add(1, Ordering::Relaxed);
-                            if let Some(counter) = progress_counter {
-                                counter.fetch_add(1, Ordering::Relaxed);
-                            }
-                            return None;
+                        // We used to skip files larger than 200MB, but now we use image resizing 
+                        // for perceptual hash calculation, so we can handle large files efficiently
+                        if file_size > 200_000_000 { // 200MB limit - log but don't skip
+                            // Just log large file for monitoring
+                            log::info!(
+                                "Processing large file ({}MB) with resize optimization: '{}'",
+                                file_size / 1_000_000, path_display
+                            );
                         }
                     },
                     Err(e) => {
@@ -145,6 +138,12 @@ pub fn process_image_batch(
                     let cancel_token = Arc::new(AtomicBool::new(false));
                     let cancel_token_clone = cancel_token.clone();
 
+                    // Get file extension for timeout configuration before moving path
+                    let file_ext = path.extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+
                     // Spawn a thread to compute the hash with a timeout
                     let path_clone = path.clone();
                     let (tx, rx) = std::sync::mpsc::channel();
@@ -164,8 +163,18 @@ pub fn process_image_batch(
                         }
                     });
 
-                    // Wait with timeout
-                    match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                    // Determine timeout based on file extension
+                    let timeout_duration = {
+                        if ["raw", "raf", "dng", "cr2", "nef", "arw", "orf", "rw2", "nrw", "crw", "pef", "srw", "x3f", "rwl", "3fr"].contains(&file_ext.as_str()) {
+                            // Use longer timeout for RAW formats
+                            std::time::Duration::from_secs(15) // 15 seconds for RAW
+                        } else {
+                            std::time::Duration::from_secs(5) // 5 seconds for regular images
+                        }
+                    };
+                    
+                    // Wait with the appropriate timeout
+                    match rx.recv_timeout(timeout_duration) {
                         Ok(result) => {
                             // Thread completed within timeout - ensure it's joined
                             let _ = handle.join();
@@ -175,13 +184,14 @@ pub fn process_image_batch(
                             // Timeout occurred, thread is still running - signal cancellation
                             cancel_token.store(true, Ordering::SeqCst);
                             
-                            // Log timeout
+                            // Log timeout with format-specific information
+                            let timeout_seconds = timeout_duration.as_secs();
                             info!("TIMEOUT: Crypto hash took too long for '{}'", path_display);
 
                             // Log the timeout error properly
                             let timeout_err = std::io::Error::new(
                                 std::io::ErrorKind::TimedOut,
-                                format!("Crypto hash computation timed out after 5 seconds: {:?}", e)
+                                format!("Crypto hash computation timed out after {} seconds: {:?}", timeout_seconds, e)
                             );
                             crate::logging::log_hash_error(path, &timeout_err);
 
@@ -241,6 +251,12 @@ pub fn process_image_batch(
                         let cancel_token = Arc::new(AtomicBool::new(false));
                         let cancel_token_clone = cancel_token.clone();
 
+                        // Get file extension for timeout configuration before moving path
+                        let file_ext = path.extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+
                         // Spawn a thread to compute the hash with a timeout
                         let path_clone = path.clone();
                         let (tx, rx) = std::sync::mpsc::channel();
@@ -260,8 +276,18 @@ pub fn process_image_batch(
                             }
                         });
 
-                        // Wait with timeout
-                        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+                        // Determine timeout based on file extension
+                        let timeout_duration = {
+                            if ["raw", "raf", "dng", "cr2", "nef", "arw", "orf", "rw2", "nrw", "crw", "pef", "srw", "x3f", "rwl", "3fr"].contains(&file_ext.as_str()) {
+                                // Use longer timeout for RAW formats
+                                std::time::Duration::from_secs(30) // 30 seconds for RAW
+                            } else {
+                                std::time::Duration::from_secs(10) // 10 seconds for regular images
+                            }
+                        };
+                        
+                        // Wait with the appropriate timeout
+                        match rx.recv_timeout(timeout_duration) {
                             Ok(result) => {
                                 // Thread completed within timeout - ensure it's joined
                                 let _ = handle.join();
@@ -271,13 +297,14 @@ pub fn process_image_batch(
                                 // Timeout occurred, thread is still running - signal cancellation
                                 cancel_token.store(true, Ordering::SeqCst);
                                 
-                                // Log timeout
+                                // Log timeout with format-specific information
+                                let timeout_seconds = timeout_duration.as_secs();
                                 info!("TIMEOUT: Perceptual hash took too long for '{}'", path_display);
 
                                 // Log the timeout error properly
                                 let timeout_err = std::io::Error::new(
                                     std::io::ErrorKind::TimedOut,
-                                    format!("Perceptual hash computation timed out after 10 seconds: {:?}", e)
+                                    format!("Perceptual hash computation timed out after {} seconds: {:?}", timeout_seconds, e)
                                 );
                                 crate::logging::log_hash_error(path, &timeout_err);
 

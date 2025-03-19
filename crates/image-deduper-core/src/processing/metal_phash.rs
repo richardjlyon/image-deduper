@@ -304,33 +304,141 @@ pub fn gpu_accelerated_phash(img: &DynamicImage) -> PHash {
         return crate::processing::perceptual::calculate_phash(img);
     }
 
+    // For larger images, we can optionally resize them first to reduce processing time
+    // But for GPU processing, we prefer to use the full resolution image if possible
+    
     // For larger images with GPU, use enhanced hash
     if let Some(hash) = metal_phash(img) {
         return hash; // Enhanced 1024-bit hash
     }
 
     // Fall back to CPU implementation if Metal is not available
+    // If we're falling back to CPU and the image is very large, consider resizing
+    if width > 4096 || height > 4096 {
+        // For extremely large images on CPU, resize to 1024px max dimension
+        log::info!(
+            "Resizing very large image ({}x{}) for CPU perceptual hash computation",
+            width, height
+        );
+        
+        // Calculate target dimensions maintaining aspect ratio
+        let (target_width, target_height) = if width > height {
+            let scale = 1024.0 / width as f32;
+            (1024, (height as f32 * scale).round() as u32)
+        } else {
+            let scale = 1024.0 / height as f32;
+            ((width as f32 * scale).round() as u32, 1024)
+        };
+        
+        // Resize the image
+        let resized = img.resize(
+            target_width, 
+            target_height, 
+            image::imageops::FilterType::Lanczos3
+        );
+        
+        return crate::processing::perceptual::calculate_phash(&resized);
+    }
+
+    // For moderately large images, use standard CPU hash directly
     crate::processing::perceptual::calculate_phash(img)
 }
 
 /// Calculate a perceptual hash from an image file with GPU acceleration if available
 /// This function intelligently chooses between enhanced and standard hash based on GPU availability
 pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
-    // Standard image opening logic
-    let img = image::open(path.as_ref())?;
-
+    // Try to efficiently get image dimensions without loading the whole image
+    let path_ref = path.as_ref();
+    let reader = image::io::Reader::open(path_ref);
+    
+    // If we can get dimensions efficiently, use them to make resizing decisions
+    if let Ok(reader) = reader {
+        if let Ok(reader) = reader.with_guessed_format() {
+            if let Ok((width, height)) = reader.into_dimensions() {
+                // For small images, load directly and use standard CPU hash
+                if width < 1024 && height < 1024 {
+                    let img = image::open(path_ref)?;
+                    return Ok(crate::processing::perceptual::calculate_phash(&img));
+                }
+                
+                // For very large images (especially if GPU isn't available), resize before loading
+                if width > 8192 || height > 8192 {
+                    log::info!(
+                        "Pre-resizing extremely large image ({}x{}) for hash computation: {}",
+                        width, height, path_ref.display()
+                    );
+                    
+                    // Calculate target dimensions maintaining aspect ratio
+                    let (target_width, target_height) = if width > height {
+                        let scale = 2048.0 / width as f32;
+                        (2048, (height as f32 * scale).round() as u32)
+                    } else {
+                        let scale = 2048.0 / height as f32;
+                        ((width as f32 * scale).round() as u32, 2048)
+                    };
+                    
+                    // Load image with resize filter to drastically reduce memory usage
+                    if let Ok(img) = image::open(path_ref) {
+                        let resized = img.resize(
+                            target_width, 
+                            target_height, 
+                            image::imageops::FilterType::Triangle // Faster filter for very large images
+                        );
+                        
+                        // Try GPU hash first on resized image
+                        if let Some(hash) = metal_phash(&resized) {
+                            return Ok(hash);
+                        }
+                        
+                        // Fall back to CPU implementation on resized image
+                        return Ok(crate::processing::perceptual::calculate_phash(&resized));
+                    }
+                }
+            }
+        }
+    }
+    
+    // Standard image opening logic for normal-sized images
+    let img = image::open(path_ref)?;
+    
     // Get image dimensions
     let (width, height) = img.dimensions();
-
+    
     // For small images, use standard CPU hash
     if width < 1024 && height < 1024 {
         return Ok(crate::processing::perceptual::calculate_phash(&img));
     }
-
+    
     // For larger images with GPU, use enhanced hash (1024-bit)
     if let Some(hash) = metal_phash(&img) {
         Ok(hash)
     } else {
+        // Apply resizing logic for CPU fallback with large images
+        if width > 4096 || height > 4096 {
+            log::info!(
+                "Resizing large image ({}x{}) for CPU hash computation",
+                width, height
+            );
+            
+            // Calculate target dimensions maintaining aspect ratio
+            let (target_width, target_height) = if width > height {
+                let scale = 1024.0 / width as f32;
+                (1024, (height as f32 * scale).round() as u32)
+            } else {
+                let scale = 1024.0 / height as f32;
+                ((width as f32 * scale).round() as u32, 1024)
+            };
+            
+            // Resize the image
+            let resized = img.resize(
+                target_width, 
+                target_height, 
+                image::imageops::FilterType::Lanczos3
+            );
+            
+            return Ok(crate::processing::perceptual::calculate_phash(&resized));
+        }
+        
         // Fall back to CPU implementation
         Ok(crate::processing::perceptual::calculate_phash(&img))
     }

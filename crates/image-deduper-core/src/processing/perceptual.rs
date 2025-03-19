@@ -419,7 +419,7 @@ fn process_raw_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError
                 .arg("dpiWidth")
                 .arg("72")
                 .arg("-Z")
-                .arg("1024") // Resize to 1024px max - much faster
+                .arg("1024") // Resize to 1024px max - much faster and avoids timeouts
                 .arg(path_ref.as_os_str())
                 .arg("--out")
                 .arg(&temp_path)
@@ -469,18 +469,50 @@ fn process_raw_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError
         }
     }
 
-    // Fast-path hash generation as fallback
-    let filename = path_ref.file_name().unwrap_or_default().to_string_lossy();
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    filename.hash(&mut hasher);
+    // Try to open the RAW file directly with image crate - some formats may work
+    match image::open(path_ref) {
+        Ok(img) => {
+            // If we can open the image, resize it to manageable dimensions
+            log::info!("Successfully opened RAW file directly, resizing for hash: {}", path_ref.display());
+            
+            // Resize to 1024px max dimension regardless of original size
+            let (width, height) = img.dimensions();
+            let resized = if width > 1024 || height > 1024 {
+                // Calculate target dimensions maintaining aspect ratio
+                let (target_width, target_height) = if width > height {
+                    let scale = 1024.0 / width as f32;
+                    (1024, (height as f32 * scale).round() as u32)
+                } else {
+                    let scale = 1024.0 / height as f32;
+                    ((width as f32 * scale).round() as u32, 1024)
+                };
+                
+                img.resize(target_width, target_height, image::imageops::FilterType::Triangle)
+            } else {
+                img
+            };
+            
+            // Compute hash on resized image
+            return Ok(calculate_phash(&resized));
+        },
+        Err(_) => {
+            // If direct opening fails, fall back to filename-based hash
+            log::warn!("Unable to directly process RAW file ({}), using filename hash as fallback", path_ref.display());
+            
+            // Fast-path hash generation as last resort fallback
+            let filename = path_ref.file_name().unwrap_or_default().to_string_lossy();
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            filename.hash(&mut hasher);
 
-    // Add file size to the hash if available
-    if let Ok(metadata) = std::fs::metadata(path_ref) {
-        metadata.len().hash(&mut hasher);
+            // Add file size to the hash if available
+            if let Ok(metadata) = std::fs::metadata(path_ref) {
+                metadata.len().hash(&mut hasher);
+            }
+
+            let filename_hash = hasher.finish();
+            Ok(PHash::Standard(filename_hash))
+        }
     }
-
-    let filename_hash = hasher.finish();
-    Ok(PHash::Standard(filename_hash))
 }
 
 /// Calculate a perceptual hash from an image file
@@ -513,9 +545,9 @@ pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErr
         }
     }
 
-    // Try to open the image with the standard image library for other formats
-    match image::open(path_ref) {
-        Ok(img) => return Ok(calculate_phash(&img)),
+    // Use our large image handling process to automatically resize if needed
+    match process_large_image(path_ref) {
+        Ok(hash) => return Ok(hash),
         Err(e) => {
             let error_str = format!("{:?}", e);
 
@@ -642,7 +674,44 @@ pub fn enhanced_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image:
         }
     }
 
-    // For standard formats, use the enhanced hash
+    // Handle large image resizing for enhanced hash calculation
+    // First try to efficiently get image dimensions without loading the whole image
+    if let Ok(reader) = image::io::Reader::open(path_ref) {
+        if let Ok(reader) = reader.with_guessed_format() {
+            if let Ok((width, height)) = reader.into_dimensions() {
+                // If the image is very large, resize it before computing the hash
+                if width > 1024 || height > 1024 {
+                    log::info!(
+                        "Downscaling large image ({}x{}) for enhanced perceptual hash: {}",
+                        width, height, path_ref.display()
+                    );
+                    
+                    // Calculate target dimensions maintaining aspect ratio
+                    let (target_width, target_height) = if width > height {
+                        let scale = 1024.0 / width as f32;
+                        (1024, (height as f32 * scale).round() as u32)
+                    } else {
+                        let scale = 1024.0 / height as f32;
+                        ((width as f32 * scale).round() as u32, 1024)
+                    };
+                    
+                    // Load image and resize it to target dimensions
+                    if let Ok(img) = image::open(path_ref) {
+                        let resized = img.resize(
+                            target_width, 
+                            target_height, 
+                            image::imageops::FilterType::Lanczos3
+                        );
+                        
+                        // Compute enhanced hash on resized image
+                        return Ok(calculate_enhanced_phash(&resized));
+                    }
+                }
+            }
+        }
+    }
+
+    // For standard formats or small images, use the regular load path
     match image::open(path_ref) {
         Ok(img) => Ok(calculate_enhanced_phash(&img)),
         Err(e) => Err(e),
@@ -652,6 +721,52 @@ pub fn enhanced_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image:
 /// Calculate an enhanced perceptual hash from an image in memory
 pub fn enhanced_phash_from_img(img: &DynamicImage) -> PHash {
     calculate_enhanced_phash(img)
+}
+
+/// Process a large image by downscaling it for perceptual hash computation
+/// This allows us to handle very large images efficiently without timeouts
+pub fn process_large_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+    // Import used for dimensions methods
+    
+    // First try to efficiently get image dimensions without loading the whole image
+    let reader = image::io::Reader::open(path.as_ref())?;
+    let reader = reader.with_guessed_format()?;
+    let dimensions = reader.into_dimensions();
+    
+    // If we can get dimensions directly, use them for efficient resizing decision
+    if let Ok((width, height)) = dimensions {
+        // If the image is very large, resize it before computing the hash
+        if width > 1024 || height > 1024 {
+            log::info!(
+                "Downscaling large image ({}x{}) for perceptual hash computation: {}",
+                width, height, path.as_ref().display()
+            );
+            
+            // Calculate target dimensions maintaining aspect ratio
+            let (target_width, target_height) = if width > height {
+                let scale = 1024.0 / width as f32;
+                (1024, (height as f32 * scale).round() as u32)
+            } else {
+                let scale = 1024.0 / height as f32;
+                ((width as f32 * scale).round() as u32, 1024)
+            };
+            
+            // Load image and resize it to target dimensions
+            let img = image::open(path.as_ref())?;
+            let resized = img.resize(
+                target_width, 
+                target_height, 
+                image::imageops::FilterType::Lanczos3
+            );
+            
+            // Compute hash on resized image
+            return Ok(calculate_phash(&resized));
+        }
+    }
+    
+    // For smaller images or if we couldn't determine dimensions, use normal path
+    let img = image::open(path.as_ref())?;
+    Ok(calculate_phash(&img))
 }
 
 /// Helper function to check if a file is in HEIC format
@@ -730,8 +845,37 @@ fn process_heic_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErro
         let img = image::RgbImage::from_raw(width, height, pixel_data.to_vec())
             .ok_or_else(|| heic_error("Failed to create RGB image from HEIC data"))?;
 
-        // Convert to DynamicImage and compute hash
+        // Convert to DynamicImage
         let dynamic_img = image::DynamicImage::ImageRgb8(img);
+        
+        // Check if image is large - if so, resize before computing hash
+        if width > 1024 || height > 1024 {
+            log::info!(
+                "Downscaling large HEIC image ({}x{}) for perceptual hash: {}",
+                width, height, path_ref.display()
+            );
+            
+            // Calculate target dimensions maintaining aspect ratio
+            let (target_width, target_height) = if width > height {
+                let scale = 1024.0 / width as f32;
+                (1024, (height as f32 * scale).round() as u32)
+            } else {
+                let scale = 1024.0 / height as f32;
+                ((width as f32 * scale).round() as u32, 1024)
+            };
+            
+            // Resize the image
+            let resized = dynamic_img.resize(
+                target_width, 
+                target_height, 
+                image::imageops::FilterType::Lanczos3
+            );
+            
+            // Compute hash on resized image
+            return Ok(calculate_phash(&resized));
+        }
+        
+        // For smaller images, compute hash directly
         return Ok(calculate_phash(&dynamic_img));
     } else {
         return Err(heic_error("HEIC image doesn't have interleaved data"));
