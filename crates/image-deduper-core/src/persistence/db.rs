@@ -1,7 +1,7 @@
 use log::{info, warn};
 use rocksdb::{Options as RdbOptions, WriteBatch, DB};
 
-use crate::processing::process_images::ImageHashResult;
+use crate::processing::types::ImageHashResult;
 use crate::processing::PHash;
 use crate::{error::Result, get_default_db_path, Config};
 use std::path::PathBuf;

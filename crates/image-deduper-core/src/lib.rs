@@ -239,7 +239,7 @@ impl ImageDeduper {
 
             // Process this batch of images
             let batch_results =
-                processing::process_image_batch(image_batch, Some(&processed_count));
+                processing::process_image_batch(image_batch, Some(&processed_count), None);
 
             // Update success and error counts
             let batch_success = batch_results.0.len();
