@@ -21,6 +21,7 @@ libheif-rs.workspace = true
 image = { version = "0.24", features = ["png", "jpeg", "gif", "webp"] }
 metal = "0.27.0"
 objc = "0.2.7"
+# No additional dependency needed
 
 # Hashing
 blake3 = "1.5"

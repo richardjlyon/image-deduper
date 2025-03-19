@@ -3,10 +3,16 @@ use log::info;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 use super::compute_cryptographic;
-use super::perceptual::phash_from_file;
-use super::perceptual::PHash;
+use super::perceptual::{phash_from_file, process_tiff_directly, PHash};
+
+// Global skip list for problematic files that consistently cause timeouts
+// This list persists across multiple function calls to prevent repeated timeouts
+static PROBLEMATIC_FILES: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 #[derive(Debug, Clone)]
 pub struct ImageHashResult {
@@ -112,6 +118,26 @@ pub fn process_image_batch(
                                 file_size / 1_000_000, path_display
                             );
                         }
+                        
+                        // Check for TIFF files for specialized handling 
+                        if let Some(ext) = path.extension() {
+                            let ext_str = ext.to_string_lossy().to_lowercase();
+                            if ext_str == "tif" || ext_str == "tiff" {
+                                // Log TIFF processing
+                                if file_size > 100_000_000 {
+                                    // Very large TIFF gets more aggressive handling
+                                    log::info!(
+                                        "Processing large TIFF file ({}MB) with aggressive optimization: '{}'",
+                                        file_size / 1_000_000, path_display
+                                    );
+                                } else {
+                                    log::info!(
+                                        "Processing TIFF file ({}MB) with specialized handler: '{}'",
+                                        file_size / 1_000_000, path_display
+                                    );
+                                }
+                            }
+                        }
                     },
                     Err(e) => {
                         // Log metadata error
@@ -168,6 +194,9 @@ pub fn process_image_batch(
                         if ["raw", "raf", "dng", "cr2", "nef", "arw", "orf", "rw2", "nrw", "crw", "pef", "srw", "x3f", "rwl", "3fr"].contains(&file_ext.as_str()) {
                             // Use longer timeout for RAW formats
                             std::time::Duration::from_secs(15) // 15 seconds for RAW
+                        } else if ["tif", "tiff"].contains(&file_ext.as_str()) {
+                            // Longer timeout for TIFF files too
+                            std::time::Duration::from_secs(10) // 10 seconds for TIFF formats
                         } else {
                             std::time::Duration::from_secs(5) // 5 seconds for regular images
                         }
@@ -268,11 +297,62 @@ pub fn process_image_batch(
                                 return;
                             }
                             
-                            let result = phash_from_file(&path_clone);
+                            // Check if this file is in the skip list from previous timeouts
+                            let skip_this_file = {
+                                let path_str = path_clone.to_string_lossy().to_string();
+                                if let Ok(skip_list) = PROBLEMATIC_FILES.lock() {
+                                    skip_list.contains(&path_str)
+                                } else {
+                                    false
+                                }
+                            };
                             
-                            // Only send if we haven't been cancelled
-                            if !cancel_token_clone.load(Ordering::SeqCst) {
-                                let _ = tx.send(result);
+                            if skip_this_file {
+                                // Create a filename-based hash instead for previously problematic files
+                                log::info!("Skipping known problematic file: {}", path_clone.display());
+                                
+                                // Fast-path hash generation
+                                let filename = path_clone.file_name().unwrap_or_default().to_string_lossy();
+                                use std::hash::{Hash, Hasher};
+                                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                                filename.hash(&mut hasher);
+                                
+                                // Add other metadata for uniqueness
+                                if let Ok(metadata) = std::fs::metadata(&path_clone) {
+                                    metadata.len().hash(&mut hasher);
+                                    if let Ok(modified) = metadata.modified() {
+                                        if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
+                                            duration.as_secs().hash(&mut hasher);
+                                        }
+                                    }
+                                }
+                                
+                                let fallback_hash = hasher.finish();
+                                let _ = tx.send(Ok(PHash::Standard(fallback_hash)));
+                            } else {
+                                // Check if this is a TIFF file to use specialized handling
+                                if let Some(ext) = path_clone.extension() {
+                                    let ext_str = ext.to_string_lossy().to_lowercase();
+                                    if ext_str == "tif" || ext_str == "tiff" {
+                                        // Use specialized TIFF handling directly
+                                        log::info!("Using specialized TIFF handler for: {}", path_clone.display());
+                                        let result = process_tiff_directly(&path_clone);
+                                        
+                                        // Only send if we haven't been cancelled
+                                        if !cancel_token_clone.load(Ordering::SeqCst) {
+                                            let _ = tx.send(result);
+                                        }
+                                        return;
+                                    }
+                                }
+                                
+                                // Normal processing for regular files
+                                let result = phash_from_file(&path_clone);
+                            
+                                // Only send if we haven't been cancelled
+                                if !cancel_token_clone.load(Ordering::SeqCst) {
+                                    let _ = tx.send(result);
+                                }
                             }
                         });
 
@@ -281,6 +361,9 @@ pub fn process_image_batch(
                             if ["raw", "raf", "dng", "cr2", "nef", "arw", "orf", "rw2", "nrw", "crw", "pef", "srw", "x3f", "rwl", "3fr"].contains(&file_ext.as_str()) {
                                 // Use longer timeout for RAW formats
                                 std::time::Duration::from_secs(30) // 30 seconds for RAW
+                            } else if ["tif", "tiff"].contains(&file_ext.as_str()) {
+                                // Longer timeout for TIFF files too
+                                std::time::Duration::from_secs(20) // 20 seconds for TIFF formats
                             } else {
                                 std::time::Duration::from_secs(10) // 10 seconds for regular images
                             }
@@ -300,6 +383,14 @@ pub fn process_image_batch(
                                 // Log timeout with format-specific information
                                 let timeout_seconds = timeout_duration.as_secs();
                                 info!("TIMEOUT: Perceptual hash took too long for '{}'", path_display);
+
+                                // Add this file to the global skip list for future processing
+                                let path_str = path.to_string_lossy().to_string();
+                                if let Ok(mut skip_list) = PROBLEMATIC_FILES.lock() {
+                                    skip_list.insert(path_str);
+                                    info!("Added {} to problematic files skip list (now {} entries)", 
+                                          path_display, skip_list.len());
+                                }
 
                                 // Log the timeout error properly
                                 let timeout_err = std::io::Error::new(
