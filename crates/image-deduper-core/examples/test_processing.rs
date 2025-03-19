@@ -85,27 +85,31 @@ fn run_app() -> Result<()> {
     // sort images by size
     images.sort_by_key(|image| std::cmp::Reverse(image.size));
     println!("Sorted images by size (largest to smallest)");
-    
+
     // Filter to smaller, simpler images for testing
     println!("Filtering to smaller JPG files for better testing");
-    let smaller_images: Vec<_> = images.iter()
+    let smaller_images: Vec<_> = images
+        .iter()
         .filter(|img| {
             if let Some(ext) = img.path.extension().and_then(|e| e.to_str()) {
                 // Look for small JPG files (under 5MB)
-                (ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg")) 
-                    && img.size < 5_000_000 
+                (ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg"))
+                    && img.size < 5_000_000
             } else {
                 false
             }
         })
         .cloned()
         .collect();
-    
+
     // Process all suitable images
-    println!("Found {} suitable images, processing all of them", smaller_images.len());
-    
+    println!(
+        "Found {} suitable images, processing all of them",
+        smaller_images.len()
+    );
+
     let test_images = smaller_images;
-    
+
     println!("Image sizes being processed:");
     for (i, img) in test_images.iter().enumerate().take(10) {
         println!("  {}: {} - {}KB", i, img.path.display(), img.size / 1024);

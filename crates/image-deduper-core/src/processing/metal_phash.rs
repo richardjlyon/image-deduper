@@ -1,15 +1,15 @@
 //! GPU-accelerated perceptual hashing using Metal on macOS
 //!
-//! This module provides Metal-accelerated implementations of 
+//! This module provides Metal-accelerated implementations of
 //! perceptual hash algorithms for image comparison. It achieves
 //! significant performance improvements over CPU-based methods.
 
+use crate::processing::perceptual::PHash;
+use image::{DynamicImage, GenericImageView};
 use metal::{Device, MTLResourceOptions, MTLSize};
 use objc::rc::autoreleasepool;
-use image::{DynamicImage, GenericImageView};
 use std::path::Path;
 use std::sync::Once;
-use crate::processing::perceptual::PHash;
 
 // Metal shader for calculating grayscale and generating perceptual hash
 static METAL_SHADER_SRC: &str = r#"
@@ -124,26 +124,30 @@ impl MetalContext {
                 unsafe { METAL_AVAILABLE = !devices.is_empty() };
             });
         });
-        
+
         if !unsafe { METAL_AVAILABLE } {
             return None;
         }
-        
+
         // Use autoreleasepool for proper Objective-C memory management
         autoreleasepool(|| {
             // Get default device
             let device = Device::system_default().unwrap();
-            
+
             // Create command queue
             let command_queue = device.new_command_queue();
-            
+
             // Create Metal library and compute function
-            let library = device.new_library_with_source(METAL_SHADER_SRC, &metal::CompileOptions::new()).ok()?;
+            let library = device
+                .new_library_with_source(METAL_SHADER_SRC, &metal::CompileOptions::new())
+                .ok()?;
             let function = library.get_function("calculate_phash", None).ok()?;
-            
+
             // Create pipeline state
-            let pipeline = device.new_compute_pipeline_state_with_function(&function).ok()?;
-            
+            let pipeline = device
+                .new_compute_pipeline_state_with_function(&function)
+                .ok()?;
+
             Some(Self {
                 device,
                 command_queue,
@@ -151,7 +155,7 @@ impl MetalContext {
             })
         })
     }
-    
+
     /// Calculate enhanced perceptual hash for an image using GPU
     pub fn calculate_phash(&self, img: &DynamicImage) -> PHash {
         // Small image optimization - use CPU for images under 1024x1024
@@ -160,7 +164,7 @@ impl MetalContext {
         if width < 1024 && height < 1024 {
             return crate::processing::perceptual::calculate_phash(img);
         }
-        
+
         autoreleasepool(|| {
             // Create texture from image
             let descriptor = metal::TextureDescriptor::new();
@@ -169,23 +173,23 @@ impl MetalContext {
             descriptor.set_pixel_format(metal::MTLPixelFormat::RGBA8Unorm);
             descriptor.set_storage_mode(metal::MTLStorageMode::Shared);
             descriptor.set_usage(metal::MTLTextureUsage::ShaderRead);
-            
+
             // Create texture
             let texture = self.device.new_texture(&descriptor);
-            
+
             // Copy image data to texture
             let region = MTLSize {
                 width: width as u64,
                 height: height as u64,
                 depth: 1,
             };
-            
+
             // Extract RGBA pixels from image more efficiently
             let pixel_data = {
                 let rgba = img.to_rgba8();
                 rgba.into_raw()
             };
-            
+
             // Upload pixel data to texture
             texture.replace_region(
                 metal::MTLRegion {
@@ -196,48 +200,48 @@ impl MetalContext {
                 pixel_data.as_ptr() as *const _,
                 (width * 4) as u64, // bytes per row
             );
-            
+
             // Create buffer for the result array (16 x u64 = 1024 bits)
             let result_buffer = self.device.new_buffer(
                 128, // 16 * 8 bytes for u64 array
-                MTLResourceOptions::StorageModeShared
+                MTLResourceOptions::StorageModeShared,
             );
-            
+
             // Create command buffer and encoder
             let command_buffer = self.command_queue.new_command_buffer();
             let compute_encoder = command_buffer.new_compute_command_encoder();
-            
+
             // Configure pipeline
             compute_encoder.set_compute_pipeline_state(&self.pipeline);
-            
+
             // Set resource arguments
             compute_encoder.set_texture(0, Some(&texture));
             compute_encoder.set_buffer(0, Some(&result_buffer), 0);
-            
+
             // Metal pipeline setup for our 16-thread kernel
             let grid_size = MTLSize {
                 width: 4,
                 height: 4,
                 depth: 1,
             };
-            
+
             // Each thread group handles 4 threads (4x4 = 16 threads total)
             let thread_group_size = MTLSize {
                 width: 4,
                 height: 1,
                 depth: 1,
             };
-            
+
             // Dispatch threads
             compute_encoder.dispatch_thread_groups(grid_size, thread_group_size);
-            
+
             // End encoding
             compute_encoder.end_encoding();
-            
+
             // Commit and wait for completion
             command_buffer.commit();
             command_buffer.wait_until_completed();
-            
+
             // Read back result array
             let mut hash_array = [0u64; 16];
             unsafe {
@@ -246,7 +250,7 @@ impl MetalContext {
                     hash_array[i] = *ptr.add(i);
                 }
             }
-            
+
             // Return the enhanced hash
             PHash::Enhanced(hash_array)
         })
@@ -264,14 +268,14 @@ impl MetalInstance {
             context: MetalContext::new(),
         }
     }
-    
+
     fn get() -> &'static std::sync::Mutex<MetalInstance> {
-        use std::sync::Mutex;
         use once_cell::sync::Lazy;
-        
-        static INSTANCE: Lazy<Mutex<MetalInstance>> = 
+        use std::sync::Mutex;
+
+        static INSTANCE: Lazy<Mutex<MetalInstance>> =
             Lazy::new(|| Mutex::new(MetalInstance::new()));
-            
+
         &INSTANCE
     }
 }
@@ -294,17 +298,17 @@ pub fn metal_phash(img: &DynamicImage) -> Option<PHash> {
 pub fn gpu_accelerated_phash(img: &DynamicImage) -> PHash {
     // Get image dimensions
     let (width, height) = img.dimensions();
-    
+
     // For small images, use standard CPU hash
     if width < 1024 && height < 1024 {
         return crate::processing::perceptual::calculate_phash(img);
     }
-    
+
     // For larger images with GPU, use enhanced hash
     if let Some(hash) = metal_phash(img) {
-        return hash;  // Enhanced 1024-bit hash
+        return hash; // Enhanced 1024-bit hash
     }
-    
+
     // Fall back to CPU implementation if Metal is not available
     crate::processing::perceptual::calculate_phash(img)
 }
@@ -314,15 +318,15 @@ pub fn gpu_accelerated_phash(img: &DynamicImage) -> PHash {
 pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
     // Standard image opening logic
     let img = image::open(path.as_ref())?;
-    
+
     // Get image dimensions
     let (width, height) = img.dimensions();
-    
+
     // For small images, use standard CPU hash
     if width < 1024 && height < 1024 {
         return Ok(crate::processing::perceptual::calculate_phash(&img));
     }
-    
+
     // For larger images with GPU, use enhanced hash (1024-bit)
     if let Some(hash) = metal_phash(&img) {
         Ok(hash)

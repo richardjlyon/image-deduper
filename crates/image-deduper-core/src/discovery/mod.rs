@@ -57,18 +57,19 @@ pub fn discover_images_in_directory(directory: &Path, config: &Config) -> Result
         .filter(|e| {
             // Check if the current path (file or directory) is in an excluded directory
             let current_path = e.path();
-            
+
             // Check if it's a hidden file (starts with a dot)
             let is_hidden = current_path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .map(|name| name.starts_with('.'))
                 .unwrap_or(false);
-            
-            let is_excluded = is_hidden || config
-                .excluded_directories
-                .iter()
-                .any(|excluded| current_path.starts_with(excluded));
+
+            let is_excluded = is_hidden
+                || config
+                    .excluded_directories
+                    .iter()
+                    .any(|excluded| current_path.starts_with(excluded));
 
             // Keep entry only if it's not excluded and is a file
             !is_excluded && e.file_type().is_file()

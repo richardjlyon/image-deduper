@@ -1,8 +1,8 @@
 #[allow(clippy::module_inception)]
 #[cfg(test)]
 mod tests {
-    use crate::processing::{compute_cryptographic, process_images};
     use crate::processing::perceptual::{phash_from_file, PHash};
+    use crate::processing::{compute_cryptographic, process_images};
     use crate::test_utils::test_support::test_image_registry::TEST_IMAGES;
     // Use the test image registry from test_support
     // use crate::test_support::test_image_registry::TEST_IMAGES;
