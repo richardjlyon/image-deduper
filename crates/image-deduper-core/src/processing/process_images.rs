@@ -466,6 +466,7 @@ pub fn process_images_in_batches(
         }
 
         // Force memory cleanup of remaining objects
+        #[allow(dropping_references)]
         drop(chunk_slice);
         let _ = chunk_slice;
 

@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 use image_deduper_core::get_project_root;
 use image_deduper_core::logging;
-use image_deduper_core::persistence;
 use image_deduper_core::Config;
 use image_deduper_core::ImageDeduper;
 use image_deduper_core::LogLevel;
@@ -68,60 +67,19 @@ fn run_app() -> Result<()> {
     };
 
     let deduper = ImageDeduper::new(config);
+    let source_directory = PathBuf::from("/Volumes/SamsungT9/Mylio_22c15a");
 
-    // Get and display database statistics
-    let (pc_count, pp_count) = deduper.get_db_stats()?;
-    println!("Current database contents:");
-    println!("  - Cryptographic hashes: {}", pc_count);
-    println!("  - Perceptual hashes: {}", pp_count);
-    println!("  - Total unique images: {}", pc_count);
-    println!();
-
-    println!("Discovering images...");
-    let mut images =
-        deduper.discover_images(&[PathBuf::from("/Volumes/SamsungT9/Mylio_22c15a")])?;
+    println!("Indexing {} for images...", source_directory.display());
+    let mut images = deduper.discover_images(&[source_directory])?;
     println!("Found {} images", images.len());
 
-    // sort images by size
+    // Sort images by size
     images.sort_by_key(|image| std::cmp::Reverse(image.size));
-    println!("Sorted images by size (largest to smallest)");
-
-    // Filter to smaller, simpler images for testing
-    println!("Filtering to smaller JPG files for better testing");
-    let smaller_images: Vec<_> = images
-        .iter()
-        .filter(|img| {
-            if let Some(ext) = img.path.extension().and_then(|e| e.to_str()) {
-                // Look for small JPG files (under 5MB)
-                (ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg"))
-                    && img.size < 5_000_000
-            } else {
-                false
-            }
-        })
-        .cloned()
-        .collect();
-
-    // Process all suitable images
-    println!(
-        "Found {} suitable images, processing all of them",
-        smaller_images.len()
-    );
-
-    let test_images = smaller_images;
-
-    println!("Image sizes being processed:");
-    for (i, img) in test_images.iter().enumerate().take(10) {
-        println!("  {}: {} - {}KB", i, img.path.display(), img.size / 1024);
-    }
-    if test_images.len() > 10 {
-        println!("  ... and {} more", test_images.len() - 10);
-    }
-
     println!("Processing images...");
+
     // Use force_rescan=true to process all test images
     // Note: detailed progress will be shown by the progress bar
-    let _ = deduper.process_images(&test_images, true)?;
+    let _ = deduper.process_images(&images, true)?;
 
     // Display final database statistics
     let (final_pc_count, final_pp_count) = deduper.get_db_stats()?;
@@ -129,7 +87,6 @@ fn run_app() -> Result<()> {
     println!("  - Cryptographic hashes: {}", final_pc_count);
     println!("  - Perceptual hashes: {}", final_pp_count);
     println!("  - Total unique images: {}", final_pc_count);
-    println!("  - New images added: {}", final_pc_count - pc_count);
 
     Ok(())
 }

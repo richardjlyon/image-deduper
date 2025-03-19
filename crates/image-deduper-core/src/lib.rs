@@ -11,7 +11,6 @@
 use log::{info, warn};
 use persistence::diagnose_database;
 use rocksdb::DB;
-use sysinfo::System;
 
 // -- Standard Library --
 use std::path::PathBuf;
@@ -19,9 +18,8 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
-        Arc, Mutex,
+        Arc,
     },
-    time::Instant,
 };
 
 // -- Internal Modules --
@@ -58,80 +56,6 @@ pub fn get_project_root() -> PathBuf {
 pub fn get_default_db_path() -> PathBuf {
     let home = dirs::home_dir().expect("Could not determine home directory");
     home.join(".image-deduper").join("db")
-}
-
-/// Memory usage tracker
-pub struct MemoryTracker {
-    system: Mutex<System>,
-    start_memory: u64,
-    peak_memory: AtomicUsize,
-    last_check: Mutex<Instant>,
-}
-
-impl MemoryTracker {
-    /// Create a new memory tracker
-    fn new() -> Self {
-        let mut system = System::new_all();
-        system.refresh_all();
-
-        let total_used = system.used_memory();
-
-        Self {
-            system: Mutex::new(system),
-            start_memory: total_used,
-            peak_memory: AtomicUsize::new(total_used as usize),
-            last_check: Mutex::new(Instant::now()),
-        }
-    }
-
-    /// Update memory usage statistics and log if significant changes detected
-    pub fn update(&self) -> (u64, u64) {
-        let mut system = self.system.lock().unwrap();
-        system.refresh_memory();
-
-        let current_used = system.used_memory();
-        let usage_diff = if current_used > self.start_memory {
-            current_used - self.start_memory
-        } else {
-            0
-        };
-
-        // Update peak memory
-        let peak = self.peak_memory.load(std::sync::atomic::Ordering::Relaxed) as u64;
-        if current_used > peak {
-            self.peak_memory
-                .store(current_used as usize, std::sync::atomic::Ordering::Relaxed);
-        }
-
-        // Only log if enough time has passed since last check
-        let mut last_check = self.last_check.lock().unwrap();
-        if last_check.elapsed().as_secs() >= 5 {
-            // Log memory usage in MB
-            info!(
-                "Memory usage: current={}MB, diff=+{}MB, peak={}MB",
-                current_used / 1024 / 1024,
-                usage_diff / 1024 / 1024,
-                self.peak_memory.load(std::sync::atomic::Ordering::Relaxed) as u64 / 1024 / 1024
-            );
-            *last_check = Instant::now();
-        }
-
-        (current_used, usage_diff)
-    }
-
-    /// Get peak memory usage in MB
-    pub fn peak_mb(&self) -> u64 {
-        self.peak_memory.load(std::sync::atomic::Ordering::Relaxed) as u64 / 1024 / 1024
-    }
-
-    /// Get current memory usage diff in MB
-    pub fn current_diff_mb(&self) -> i64 {
-        let mut system = self.system.lock().unwrap();
-        system.refresh_memory();
-
-        let current_used = system.used_memory();
-        ((current_used as i64) - (self.start_memory as i64)) / 1024 / 1024
-    }
 }
 
 /// Main entry point for the deduplication process
@@ -217,7 +141,7 @@ impl ImageDeduper {
         } else {
             // Filter out images already in database
             let new_paths = persistence::filter_new_images(&self.db, &image_paths)?;
-            info!("Found {} new images to process", new_paths.len());
+            println!("->> Found {} new images to process", new_paths.len());
             new_paths
         };
 
