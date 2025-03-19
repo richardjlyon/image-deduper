@@ -334,8 +334,20 @@ pub fn process_image_batch(
                                 if let Some(ext) = path_clone.extension() {
                                     let ext_str = ext.to_string_lossy().to_lowercase();
                                     if ext_str == "tif" || ext_str == "tiff" {
-                                        // Use specialized TIFF handling directly
-                                        log::info!("Using specialized TIFF handler for: {}", path_clone.display());
+                                        // Use specialized TIFF handler with detailed logging
+                                        let file_size = if let Ok(metadata) = std::fs::metadata(&path_clone) {
+                                            metadata.len() / 1_000_000 // Convert to MB
+                                        } else {
+                                            0
+                                        };
+                                        
+                                        if file_size > 100 {
+                                            log::info!("Using specialized TIFF handler for large ({}MB) file: {}", 
+                                                    file_size, path_clone.display());
+                                        } else {
+                                            log::info!("Using specialized TIFF handler for: {}", path_clone.display());
+                                        }
+                                        
                                         let result = process_tiff_directly(&path_clone);
                                         
                                         // Only send if we haven't been cancelled

@@ -328,6 +328,24 @@ fn process_tiff_with_fallback<P: AsRef<Path>>(path: P) -> Result<PHash, image::I
         let random_name = format!("tiff_{}.jpg", timestamp);
         let temp_path = temp_dir.join(random_name);
 
+        // Check file size to determine how aggressive we need to be
+        let size_based_settings = if let Ok(metadata) = std::fs::metadata(path_ref) {
+            let file_size = metadata.len();
+            if file_size > 300_000_000 { // 300MB+
+                // Extreme downscaling for very large files
+                ("-Z", "256")
+            } else if file_size > 100_000_000 { // 100MB+
+                // Strong downscaling for large files
+                ("-Z", "384")
+            } else {
+                // Moderate downscaling for regular files
+                ("-Z", "512") 
+            }
+        } else {
+            // Default if we can't get the size
+            ("-Z", "512")
+        };
+
         // Try to convert using sips with optimized settings for speed
         let output = Command::new("sips")
             .arg("-s")
@@ -339,8 +357,8 @@ fn process_tiff_with_fallback<P: AsRef<Path>>(path: P) -> Result<PHash, image::I
             .arg("-s")
             .arg("dpiWidth")
             .arg("72")
-            .arg("-Z")
-            .arg("512") // Smaller target size for faster processing
+            .arg(size_based_settings.0)
+            .arg(size_based_settings.1) // Size based on file size
             .arg(path_ref.as_os_str())
             .arg("--out")
             .arg(&temp_path)
@@ -444,7 +462,63 @@ fn process_tiff_with_downscaling<P: AsRef<Path>>(path: P) -> Result<PHash, image
                                         Ok(calculate_phash(&resized))
                                     },
                                     Err(e) => {
-                                        log::info!("Failed to decode TIFF directly: {}: {}", path_ref.display(), e);
+                                        // Check if error is memory related
+                                        let err_str = e.to_string();
+                                        if err_str.contains("Memory limit exceeded") || 
+                                           err_str.contains("memory") || 
+                                           err_str.contains("allocation") {
+                                            
+                                            log::error!("Memory limit exceeded when processing TIFF: {}", path_ref.display());
+                                            
+                                            // For memory errors, try with even more aggressive settings
+                                            // Use sips on macOS as it's highly optimized for memory usage
+                                            if cfg!(target_os = "macos") {
+                                                // Try to convert using sips for memory-efficient processing
+                                                let temp_dir = std::env::temp_dir();
+                                                let timestamp = std::time::SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .unwrap_or_default()
+                                                    .as_millis();
+                                                let random_name = format!("tiff_mem_error_{}.jpg", timestamp);
+                                                let temp_path = temp_dir.join(random_name);
+                                                
+                                                log::info!("Attempting memory-efficient conversion for: {}", path_ref.display());
+                                                
+                                                // Use very aggressive settings to minimize memory usage
+                                                let output = std::process::Command::new("sips")
+                                                    .arg("-s")
+                                                    .arg("format")
+                                                    .arg("jpeg")
+                                                    .arg("-Z")
+                                                    .arg("256") // Use much smaller target size for memory issues
+                                                    .arg(path_ref.as_os_str())
+                                                    .arg("--out")
+                                                    .arg(&temp_path)
+                                                    .output();
+                                                
+                                                match output {
+                                                    Ok(output) if output.status.success() && temp_path.exists() => {
+                                                        if let Ok(img) = image::open(&temp_path) {
+                                                            let result = calculate_phash(&img);
+                                                            let _ = std::fs::remove_file(&temp_path);
+                                                            log::info!("Successfully processed memory-intensive TIFF using external tools: {}", 
+                                                                path_ref.display());
+                                                            return Ok(result);
+                                                        }
+                                                        // Clean up temp file
+                                                        let _ = std::fs::remove_file(&temp_path);
+                                                    },
+                                                    _ => {
+                                                        // Fall through to error if external tools fail
+                                                        if temp_path.exists() {
+                                                            let _ = std::fs::remove_file(&temp_path);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        
+                                        log::error!("Failed to decode TIFF directly: {}: {}", path_ref.display(), e);
                                         Err(e)
                                     }
                                 }
@@ -809,10 +883,13 @@ pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErr
                 || error_str.contains("tiff")
                 || error_str.contains("TIFF")
                 || error_str.contains("invalid code")
+                || error_str.contains("memory")
+                || error_str.contains("Memory limit exceeded")
+                || error_str.contains("allocation")
             {
-                log::info!(
-                    "Identified TIFF-related error, activating fallback: {}",
-                    path_ref.display()
+                log::warn!(
+                    "Identified TIFF-related error ({}), activating fallback: {}",
+                    e, path_ref.display()
                 );
                 return process_tiff_with_fallback(path_ref);
             }
