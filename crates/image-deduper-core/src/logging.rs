@@ -73,51 +73,94 @@ impl BetterStackAppender {
     }
 
     fn format_log(&self, record: &Record) -> Option<String> {
-        // Create a simple writer that implements both std::io::Write and log4rs::encode::Write
-        struct SimpleWriter(Vec<u8>);
-
-        impl io::Write for SimpleWriter {
-            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-                self.0.extend_from_slice(buf);
-                Ok(buf.len())
+        // Parse the log message to extract structured data
+        let message = record.args().to_string();
+        
+        // Extract operation, path, and error details for structured logs
+        // Patterns to match:
+        // 1. "Hash computation failed - Path: /path/to/file, Error: I/O error: Timeout"
+        // 2. "File operation failed - Operation: read, Path: /path/to/file, Error: Permission denied"
+        
+        let (operation, path, error_type, error_details) = if message.starts_with("Hash computation failed") {
+            // Extract path and error from hash error messages
+            let parts: Vec<&str> = message.splitn(2, " - Path: ").collect();
+            if parts.len() == 2 {
+                let path_error_parts: Vec<&str> = parts[1].splitn(2, ", Error: ").collect();
+                if path_error_parts.len() == 2 {
+                    let error_parts: Vec<&str> = path_error_parts[1].splitn(2, ": ").collect();
+                    if error_parts.len() == 2 {
+                        ("hash_computation", path_error_parts[0], error_parts[0], error_parts[1])
+                    } else {
+                        ("hash_computation", path_error_parts[0], "generic_error", path_error_parts[1])
+                    }
+                } else {
+                    ("hash_computation", parts[1], "unknown", "")
+                }
+            } else {
+                ("hash_computation", "", "unknown", message.as_str())
             }
-
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
+        } else if message.starts_with("File operation failed") {
+            // Extract operation, path, and error from file operation messages
+            let operation_parts: Vec<&str> = message.splitn(2, "Operation: ").collect();
+            if operation_parts.len() == 2 {
+                let op_path_parts: Vec<&str> = operation_parts[1].splitn(2, ", Path: ").collect();
+                if op_path_parts.len() == 2 {
+                    let path_error_parts: Vec<&str> = op_path_parts[1].splitn(2, ", Error: ").collect();
+                    if path_error_parts.len() == 2 {
+                        (op_path_parts[0], path_error_parts[0], "file_operation", path_error_parts[1])
+                    } else {
+                        (op_path_parts[0], op_path_parts[1], "unknown", "")
+                    }
+                } else {
+                    (operation_parts[1], "", "unknown", "")
+                }
+            } else {
+                ("file_operation", "", "unknown", message.as_str())
             }
-        }
-
-        // Implement log4rs::encode::Write trait by delegating to std::io::Write
-        impl log4rs::encode::Write for SimpleWriter {}
-
-        // Create our writer
-        let mut writer = SimpleWriter(Vec::new());
-
-        // Try to encode the log message
-        if let Err(_) = self.encoder.encode(&mut writer, record) {
-            return None;
-        }
-
-        // Convert buffer to string
-        match String::from_utf8(writer.0) {
-            Ok(log_text) => {
-                // Create the current timestamp in UTC
-                let now = chrono::Utc::now().format("%Y-%m-%d %T UTC").to_string();
-
-                // Construct JSON payload for BetterStack
-                let payload = json!({
-                    "dt": now,
-                    "message": log_text.trim(),
-                    "level": record.level().to_string(),
-                    "target": record.target(),
-                    "file": record.file(),
-                    "line": record.line(),
-                });
-
-                Some(payload.to_string())
+        } else if message.starts_with("FS CHANGE") {
+            // Extract operation and path from filesystem change messages
+            let parts: Vec<&str> = message.splitn(2, "Operation: ").collect();
+            if parts.len() == 2 {
+                let op_path_parts: Vec<&str> = parts[1].splitn(2, ", Path: ").collect();
+                if op_path_parts.len() == 2 {
+                    let path_details: Vec<&str> = op_path_parts[1].splitn(2, ", Details: ").collect();
+                    if path_details.len() == 2 {
+                        (op_path_parts[0], path_details[0], "fs_change", path_details[1])
+                    } else {
+                        (op_path_parts[0], op_path_parts[1], "fs_change", "")
+                    }
+                } else {
+                    (parts[1], "", "fs_change", "")
+                }
+            } else {
+                ("fs_change", "", "unknown", message.as_str())
             }
-            Err(_) => None,
-        }
+        } else {
+            // For other messages, don't try to parse
+            ("other", "", "application", message.as_str())
+        };
+        
+        // Create the current timestamp in UTC
+        let now = chrono::Utc::now().format("%Y-%m-%d %T UTC").to_string();
+        
+        // Construct structured JSON payload for BetterStack
+        // Keep the "message" field as BetterStack likely uses this as the primary display field
+        let payload = json!({
+            "dt": now,
+            "message": format!("{} error on {}: {}", error_type, path, error_details),
+            "raw_message": message,
+            "summary": format!("{} error on {}", error_type, path),
+            "level": record.level().to_string(),
+            "source_module": record.target(),
+            "source_file": record.file(),
+            "source_line": record.line(),
+            "operation": operation,
+            "path": path,
+            "error_type": error_type,
+            "error_details": error_details
+        });
+        
+        Some(payload.to_string())
     }
 }
 
@@ -186,6 +229,10 @@ pub fn init_logger() -> Result<()> {
 
 /// Log file operation that failed
 pub fn log_file_error(path: &Path, operation: &str, error: &dyn std::error::Error) {
+    // Convert the error to string and try to extract error type and details
+    let error_string = error.to_string();
+    let (error_type, error_details) = parse_error_message(&error_string);
+    
     error!(
         "File operation failed - Operation: {}, Path: {}, Error: {}",
         operation,
@@ -196,11 +243,35 @@ pub fn log_file_error(path: &Path, operation: &str, error: &dyn std::error::Erro
 
 /// Log hash computation error
 pub fn log_hash_error<E: std::fmt::Display>(path: &Path, error: E) {
+    // Convert the error to string and try to extract error type and details
+    let error_string = error.to_string();
+    let (error_type, error_details) = parse_error_message(&error_string);
+    
     error!(
         "Hash computation failed - Path: {}, Error: {}",
         path.display(),
         error
     );
+}
+
+/// Helper function to parse error messages to extract type and details
+fn parse_error_message(error_msg: &str) -> (&str, &str) {
+    // Common error patterns
+    if error_msg.contains("I/O error:") {
+        let parts: Vec<&str> = error_msg.splitn(2, "I/O error:").collect();
+        if parts.len() == 2 {
+            return ("I/O error", parts[1].trim());
+        }
+    } else if error_msg.contains("Timeout") || error_msg.contains("timed out") {
+        return ("Timeout", error_msg);
+    } else if error_msg.contains("Permission denied") {
+        return ("Permission denied", error_msg);
+    } else if error_msg.contains("Perceptual hash") {
+        return ("Perceptual hash", error_msg);
+    }
+    
+    // Default case - keep the whole message
+    ("error", error_msg)
 }
 
 /// Log file system modification
@@ -220,16 +291,40 @@ pub fn log_fs_modification(operation: &str, path: &Path, details: Option<&str>) 
 
 /// Send a log directly to BetterStack bypassing the standard logging
 /// Useful for critical events or when the logger isn't properly initialized
-pub fn send_direct_betterstack_log(message: &str, level: &str) -> Result<()> {
+pub fn send_direct_betterstack_log(
+    message: &str, 
+    level: &str, 
+    operation: Option<&str>, 
+    path: Option<&str>, 
+    error_type: Option<&str>, 
+    details: Option<&str>
+) -> Result<()> {
     // Create a timestamp in UTC
     let now = chrono::Utc::now().format("%Y-%m-%d %T UTC").to_string();
 
-    // Prepare the JSON payload
+    // Use provided values or defaults
+    let op = operation.unwrap_or("direct");
+    let path_str = path.unwrap_or("");
+    let err_type = error_type.unwrap_or("application");
+    let err_details = details.unwrap_or(message);
+
+    // Prepare the structured JSON payload
     let payload = json!({
         "dt": now,
-        "message": message,
+        "message": format!("{} event on {}: {}", err_type, path_str, err_details),
+        "raw_message": message,
+        "summary": format!("{} event{}", 
+                          err_type, 
+                          if path_str.is_empty() { "".to_string() } else { format!(" on {}", path_str) }),
         "level": level,
-        "direct": true,
+        "source_module": "direct",
+        "source_file": "manual_log",
+        "source_line": 0,
+        "operation": op,
+        "path": path_str,
+        "error_type": err_type,
+        "error_details": err_details,
+        "direct": true
     });
 
     // Send the log directly
