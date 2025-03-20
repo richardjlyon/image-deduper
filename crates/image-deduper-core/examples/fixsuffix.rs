@@ -213,7 +213,7 @@ fn print_usage() {
 
 fn main() {
     // Initialize logging
-    if let Err(e) = logging::init_logger("logs") {
+    if let Err(e) = logging::init_logger() {
         eprintln!("Warning: Could not initialize logger: {}", e);
     }
 

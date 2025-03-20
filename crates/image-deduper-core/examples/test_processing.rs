@@ -11,10 +11,8 @@ use image_deduper_core::PriorityRule;
 use image_deduper_core::Result;
 
 fn main() -> Result<()> {
-    let log_dir = get_project_root().join("logs");
-
-    logging::init_logger(log_dir.to_str().unwrap())?;
-    println!("Logging to {}", log_dir.to_str().unwrap());
+    logging::init_logger()?;
+    println!("Remote logging to BetterStack initialized");
 
     // Print informative message to user
     println!("Starting image scanning and hashing...");
