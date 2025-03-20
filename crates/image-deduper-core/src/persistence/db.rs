@@ -1,10 +1,19 @@
-use log::{info, warn};
-use rocksdb::{Options as RdbOptions, WriteBatch, DB};
-
-use crate::processing::types::ImageHashResult;
-use crate::processing::PHash;
-use crate::{error::Result, get_default_db_path, Config};
 use std::path::PathBuf;
+
+use blake3::Hash as Blake3Hash;
+use log::{info, warn};
+use rocksdb::{IteratorMode, Options as RdbOptions, WriteBatch, DB};
+
+use crate::processing::perceptual_hash::PHash;
+use crate::processing::types::ImageHashResult;
+use crate::{error::Result, get_default_db_path, Config};
+
+#[derive(Clone, Debug)]
+pub struct DBImageData {
+    pub path: PathBuf,
+    pub crypto_hash: Option<Blake3Hash>,
+    pub perceptual_hash: Option<PHash>,
+}
 
 /// Initialize and open the RocksDB database with optimized settings
 pub fn rocksdb(config: &Config) -> Result<DB> {
@@ -44,29 +53,6 @@ pub fn rocksdb(config: &Config) -> Result<DB> {
     Ok(db)
 }
 
-/// Convert a Blake3 hash to a byte vector
-fn blake3_to_vec(hash: blake3::Hash) -> Vec<u8> {
-    hash.as_bytes().to_vec()
-}
-
-/// Convert a PHash to a byte vector
-fn phash_to_vec(phash: &PHash) -> Vec<u8> {
-    match phash {
-        PHash::Standard(hash_value) => {
-            // Convert u64 to 8 bytes
-            hash_value.to_be_bytes().to_vec()
-        }
-        PHash::Enhanced(hash_array) => {
-            // Convert [u64; 16] to 128 bytes
-            let mut bytes = Vec::with_capacity(128);
-            for &value in hash_array.iter() {
-                bytes.extend_from_slice(&value.to_be_bytes());
-            }
-            bytes
-        }
-    }
-}
-
 /// Insert cryptographic and perceptual hashes into the RocksDB database
 pub fn insert_hashes(db: &DB, path: &PathBuf, c_hash: &blake3::Hash, p_hash: &PHash) -> Result<()> {
     let path_str = path.to_string_lossy().into_owned();
@@ -83,6 +69,43 @@ pub fn insert_hashes(db: &DB, path: &PathBuf, c_hash: &blake3::Hash, p_hash: &PH
     db.put(path_p_key, &p_hash_bytes)?;
 
     Ok(())
+}
+
+pub fn get_all_hashes(db: &DB) -> Result<Vec<DBImageData>> {
+    let mut images = Vec::new();
+
+    // Iterate over all keys in the database
+    let iter = db.iterator(IteratorMode::Start);
+    for result in iter {
+        match result {
+            Ok((key, value)) => {
+                let key_str = String::from_utf8(key.to_vec()).expect("Invalid UTF-8 sequence");
+                if key_str.starts_with("pc:") {
+                    let path_str = &key_str[3..];
+                    let path = PathBuf::from(path_str);
+
+                    // Retrieve the perceptual hash
+                    let path_p_key = [b"pp:".to_vec(), path_str.as_bytes().to_vec()].concat();
+                    let p_hash_bytes = db.get(path_p_key)?;
+
+                    // Convert byte vectors back to hashes
+                    let c_hash = vec_to_blake3(&value);
+                    let p_hash = p_hash_bytes.map(|bytes| vec_to_phash(&bytes));
+
+                    images.push(DBImageData {
+                        path,
+                        crypto_hash: Some(c_hash),
+                        perceptual_hash: p_hash,
+                    });
+                }
+            }
+            Err(e) => {
+                warn!("Error iterating over database: {}", e);
+            }
+        }
+    }
+
+    Ok(images)
 }
 
 /// Insert multiple hash results efficiently in a single batch operation
@@ -144,13 +167,6 @@ pub fn filter_new_images(db: &DB, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
 
     // Process in chunks to show progress
     for (_chunk_idx, chunk) in paths.chunks(CHUNK_SIZE).enumerate() {
-        // println!(
-        //     "Checking chunk {}/{} ({} paths)...",
-        //     chunk_idx + 1,
-        //     (paths.len() + CHUNK_SIZE - 1) / CHUNK_SIZE,
-        //     chunk.len()
-        // );
-
         // let chunk_start = Instant::now();
         let chunk_new_paths: Vec<PathBuf> = chunk
             .par_iter()
@@ -159,14 +175,6 @@ pub fn filter_new_images(db: &DB, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
                 _ => None,
             })
             .collect();
-
-        // let chunk_duration = chunk_start.elapsed();
-        // println!(
-        //     "Found {} new images in chunk {} (took {:.2}s)",
-        //     chunk_new_paths.len(),
-        //     chunk_idx + 1,
-        //     chunk_duration.as_secs_f64()
-        // );
 
         new_paths.extend(chunk_new_paths);
     }
@@ -283,4 +291,58 @@ pub fn diagnose_database(db: &DB) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Convert a Blake3 hash to a byte vector
+fn blake3_to_vec(hash: blake3::Hash) -> Vec<u8> {
+    hash.as_bytes().to_vec()
+}
+
+/// Convert a PHash to a byte vector
+fn phash_to_vec(phash: &PHash) -> Vec<u8> {
+    match phash {
+        PHash::Standard(hash_value) => {
+            // Convert u64 to 8 bytes
+            hash_value.to_be_bytes().to_vec()
+        }
+        PHash::Enhanced(hash_array) => {
+            // Convert [u64; 16] to 128 bytes
+            let mut bytes = Vec::with_capacity(128);
+            for &value in hash_array.iter() {
+                bytes.extend_from_slice(&value.to_be_bytes());
+            }
+            bytes
+        }
+    }
+}
+
+// Helper function to convert byte vector to blake3::Hash
+fn vec_to_blake3(bytes: &[u8]) -> Blake3Hash {
+    let mut hash_bytes = [0u8; 32];
+    hash_bytes.copy_from_slice(bytes);
+    Blake3Hash::from(hash_bytes)
+}
+
+// Helper function to convert byte vector to PHash
+fn vec_to_phash(bytes: &[u8]) -> PHash {
+    match bytes.len() {
+        8 => {
+            // Deserialize as Standard PHash (64-bit)
+            let mut array = [0u8; 8];
+            array.copy_from_slice(bytes);
+            let value = u64::from_be_bytes(array);
+            PHash::Standard(value)
+        }
+        128 => {
+            // Deserialize as Enhanced PHash (1024-bit)
+            let mut array = [0u64; 16];
+            for (i, chunk) in bytes.chunks_exact(8).enumerate() {
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(chunk);
+                array[i] = u64::from_be_bytes(buf);
+            }
+            PHash::Enhanced(array)
+        }
+        _ => panic!("Invalid byte length for PHash"),
+    }
 }

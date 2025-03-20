@@ -59,6 +59,7 @@ reqwest = { version = "0.12", features = ["blocking", "json"] }
 sysinfo = "0.30"
 rlimit = "0.10.1" # For file descriptor limit management
 anyhow.workspace = true
+bincode = "2.0.1"
 
 [dev-dependencies]
 image.workspace = true

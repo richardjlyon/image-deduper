@@ -32,6 +32,7 @@ pub use types::*;
 // -- Public Modules --
 pub mod action;
 pub mod config;
+pub mod deduplication;
 pub mod discovery;
 pub mod logging;
 pub mod persistence;
