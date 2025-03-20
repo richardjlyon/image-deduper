@@ -36,6 +36,10 @@
 //! }
 
 use crate::log_hash_error;
+use crate::processing::file_validation::{validate_file_exists, validate_file_size};
+use crate::processing::utils::hash_computation_with_timeout::{
+    compute_cryptographic_hash_with_timeout, compute_perceptual_hash_with_timeout,
+};
 use log::info;
 use rayon::prelude::*;
 use std::path::PathBuf;
@@ -43,12 +47,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::file_validation::{validate_file_exists, validate_file_size};
-use super::hash_processing::{
-    compute_cryptographic_hash_with_timeout, compute_perceptual_hash_with_timeout,
-};
-use super::memory_management::MemoryTracker;
-use super::types::ImageHashResult;
+use super::super::types::ImageHashResult;
+use super::MemoryTracker;
 
 /// Configuration for batch processing
 #[derive(Clone)]

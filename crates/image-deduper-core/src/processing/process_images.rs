@@ -5,10 +5,9 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
-use super::batch_processor::{
-    process_image_batch as new_process_image_batch,
-    process_images as new_process_images, 
-    process_images_in_batches as new_process_images_in_batches
+use super::utils::batch_processor::{
+    process_image_batch as new_process_image_batch, process_images as new_process_images,
+    process_images_in_batches as new_process_images_in_batches,
 };
 
 // Use rather than re-export

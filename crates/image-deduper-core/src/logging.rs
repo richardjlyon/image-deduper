@@ -205,6 +205,7 @@ impl BetterStackAppender {
 }
 
 // Implement the log4rs Append trait for BetterStackAppender
+#[allow(static_mut_refs)]
 impl Append for BetterStackAppender {
     fn append(&self, record: &Record) -> anyhow::Result<()> {
         // Only process logs at or above the minimum level

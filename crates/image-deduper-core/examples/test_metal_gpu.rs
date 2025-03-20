@@ -1,5 +1,5 @@
-use image_deduper_core::processing::perceptual_hash;
-use image_deduper_core::processing::{metal_phash, perceptual_hash::PHash};
+use image_deduper_core::processing::perceptual_hash::PHash;
+use image_deduper_core::processing::{metal_phash, perceptual_hash};
 use image_deduper_core::Config;
 use rayon::prelude::*;
 use std::path::Path;

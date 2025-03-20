@@ -1,4 +1,6 @@
 use crate::log_hash_error;
+use crate::processing::perceptual_hash::{phash_from_file, process_tiff_directly};
+use crate::processing::{compute_cryptographic, PHash};
 use blake3::Hash as Blake3Hash;
 use log::info;
 use once_cell::sync::Lazy;
@@ -6,12 +8,9 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
 
-use super::crypto_hash::compute_cryptographic;
 use super::file_validation::get_file_extension;
-use super::perceptual_hash::{phash_from_file, process_tiff_directly, PHash};
-use super::timeout_utils::{
-    execute_with_timeout, extract_panic_info, get_timeout_duration, HashOperation,
-};
+// use super::perceptual_hash::{phash_from_file, process_tiff_directly, PHash};
+use super::{execute_with_timeout, extract_panic_info, get_timeout_duration, HashOperation};
 use crate::error::Result;
 
 // Global skip list for problematic files that consistently cause timeouts

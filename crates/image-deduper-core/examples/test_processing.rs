@@ -5,7 +5,6 @@ use image_deduper_core::ImageDeduper;
 use image_deduper_core::LogLevel;
 use image_deduper_core::PriorityRule;
 use image_deduper_core::Result;
-use log::debug;
 use log::info;
 /// Demonstrates the processing of images in a directory.
 use std::path::PathBuf;
