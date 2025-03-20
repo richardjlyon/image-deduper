@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use log::{error, info, LevelFilter, Record};
+use log::{info, LevelFilter, Record};
 use std::path::Path;
 use std::sync::mpsc::{channel, Sender};
 use std::thread;
@@ -13,7 +13,6 @@ use anyhow;
 use log4rs::append::Append;
 use log4rs::encode::Encode;
 use serde_json::json;
-use std::io;
 
 // Constants for BetterStack
 ***REMOVED***
@@ -23,6 +22,7 @@ use std::io;
 static mut LOG_SENDER: Option<Sender<String>> = None;
 
 /// Custom BetterStack appender
+#[allow(dead_code)]
 pub struct BetterStackAppender {
     encoder: Box<dyn Encode + Send + Sync>,
     min_level: LevelFilter,
@@ -75,13 +75,11 @@ impl BetterStackAppender {
     fn format_log(&self, record: &Record) -> Option<String> {
         // Parse the log message to extract structured data
         let message = record.args().to_string();
-        
+
         // Extract operation, path, and error details for structured logs
-        // Patterns to match:
-        // 1. "Hash computation failed - Path: /path/to/file, Error: I/O error: Timeout"
-        // 2. "File operation failed - Operation: read, Path: /path/to/file, Error: Permission denied"
-        
-        let (operation, path, error_type, error_details) = if message.starts_with("Hash computation failed") {
+        let (operation, path, error_type, error_details) = if message
+            .starts_with("Hash computation failed")
+        {
             // Extract path and error from hash error messages
             let parts: Vec<&str> = message.splitn(2, " - Path: ").collect();
             if parts.len() == 2 {
@@ -89,9 +87,19 @@ impl BetterStackAppender {
                 if path_error_parts.len() == 2 {
                     let error_parts: Vec<&str> = path_error_parts[1].splitn(2, ": ").collect();
                     if error_parts.len() == 2 {
-                        ("hash_computation", path_error_parts[0], error_parts[0], error_parts[1])
+                        (
+                            "hash_computation",
+                            path_error_parts[0],
+                            error_parts[0],
+                            error_parts[1],
+                        )
                     } else {
-                        ("hash_computation", path_error_parts[0], "generic_error", path_error_parts[1])
+                        (
+                            "hash_computation",
+                            path_error_parts[0],
+                            "generic_error",
+                            path_error_parts[1],
+                        )
                     }
                 } else {
                     ("hash_computation", parts[1], "unknown", "")
@@ -105,9 +113,15 @@ impl BetterStackAppender {
             if operation_parts.len() == 2 {
                 let op_path_parts: Vec<&str> = operation_parts[1].splitn(2, ", Path: ").collect();
                 if op_path_parts.len() == 2 {
-                    let path_error_parts: Vec<&str> = op_path_parts[1].splitn(2, ", Error: ").collect();
+                    let path_error_parts: Vec<&str> =
+                        op_path_parts[1].splitn(2, ", Error: ").collect();
                     if path_error_parts.len() == 2 {
-                        (op_path_parts[0], path_error_parts[0], "file_operation", path_error_parts[1])
+                        (
+                            op_path_parts[0],
+                            path_error_parts[0],
+                            "file_operation",
+                            path_error_parts[1],
+                        )
                     } else {
                         (op_path_parts[0], op_path_parts[1], "unknown", "")
                     }
@@ -123,9 +137,15 @@ impl BetterStackAppender {
             if parts.len() == 2 {
                 let op_path_parts: Vec<&str> = parts[1].splitn(2, ", Path: ").collect();
                 if op_path_parts.len() == 2 {
-                    let path_details: Vec<&str> = op_path_parts[1].splitn(2, ", Details: ").collect();
+                    let path_details: Vec<&str> =
+                        op_path_parts[1].splitn(2, ", Details: ").collect();
                     if path_details.len() == 2 {
-                        (op_path_parts[0], path_details[0], "fs_change", path_details[1])
+                        (
+                            op_path_parts[0],
+                            path_details[0],
+                            "fs_change",
+                            path_details[1],
+                        )
                     } else {
                         (op_path_parts[0], op_path_parts[1], "fs_change", "")
                     }
@@ -139,27 +159,47 @@ impl BetterStackAppender {
             // For other messages, don't try to parse
             ("other", "", "application", message.as_str())
         };
-        
+
         // Create the current timestamp in UTC
         let now = chrono::Utc::now().format("%Y-%m-%d %T UTC").to_string();
-        
-        // Construct structured JSON payload for BetterStack
-        // Keep the "message" field as BetterStack likely uses this as the primary display field
-        let payload = json!({
-            "dt": now,
-            "message": format!("{} error on {}: {}", error_type, path, error_details),
+
+        // Construct structured JSON payload according to BetterStack documentation
+        let formatted_message = format!("{} error on {}: {}", error_type, path, error_details);
+
+        // Extract caller module, file, and line information from the log record
+        // The target should contain the module path when using our macros
+        let module = record.target();
+
+        // File and line should come directly from the log record
+        let file = record.file().unwrap_or("unknown");
+        let line = record.line().unwrap_or(0);
+
+        // Build the data object with all the structured fields
+        let data = json!({
             "raw_message": message,
-            "summary": format!("{} error on {}", error_type, path),
-            "level": record.level().to_string(),
-            "source_module": record.target(),
-            "source_file": record.file(),
-            "source_line": record.line(),
-            "operation": operation,
-            "path": path,
-            "error_type": error_type,
-            "error_details": error_details
+            "formatted_message": formatted_message,
+            "context": {
+                "source": {
+                    "module": module,
+                    "file": file,
+                    "line": line
+                },
+                "operation": operation,
+                "path": path,
+                "error": {
+                    "type": error_type,
+                    "details": error_details
+                },
+                "timestamp": now
+            }
         });
-        
+
+        // Construct the outer payload according to BetterStack format
+        let payload = json!({
+            "level": record.level().to_string(),
+            "data": data
+        });
+
         Some(payload.to_string())
     }
 }
@@ -205,11 +245,7 @@ pub fn init_logger() -> Result<()> {
     // Build the logger configuration with only BetterStack appender
     let config = Config::builder()
         .appender(Appender::builder().build("betterstack", Box::new(betterstack_appender)))
-        .build(
-            Root::builder()
-                .appender("betterstack")
-                .build(level),
-        )
+        .build(Root::builder().appender("betterstack").build(level))
         .map_err(|e| Error::Unknown(format!("Failed to build log config: {}", e)))?;
 
     // Use the configured logger
@@ -228,76 +264,101 @@ pub fn init_logger() -> Result<()> {
 }
 
 /// Log file operation that failed
-pub fn log_file_error(path: &Path, operation: &str, error: &dyn std::error::Error) {
-    // Convert the error to string and try to extract error type and details
-    let error_string = error.to_string();
-    let (error_type, error_details) = parse_error_message(&error_string);
-    
-    error!(
-        "File operation failed - Operation: {}, Path: {}, Error: {}",
-        operation,
-        path.display(),
-        error
-    );
+///
+/// This macro captures the caller's file, line, and module info
+#[macro_export]
+macro_rules! log_file_error {
+    ($path:expr, $operation:expr, $error:expr) => {
+        log::error!(
+            target: module_path!(),
+            "File operation failed - Operation: {}, Path: {}, Error: {}",
+            $operation,
+            $path.display(),
+            $error
+        );
+    };
 }
 
 /// Log hash computation error
-pub fn log_hash_error<E: std::fmt::Display>(path: &Path, error: E) {
-    // Convert the error to string and try to extract error type and details
-    let error_string = error.to_string();
-    let (error_type, error_details) = parse_error_message(&error_string);
-    
-    error!(
-        "Hash computation failed - Path: {}, Error: {}",
-        path.display(),
-        error
-    );
+///
+/// This macro captures the caller's file, line, and module info
+#[macro_export]
+macro_rules! log_hash_error {
+    ($path:expr, $error:expr) => {
+        log::error!(
+            target: module_path!(),
+            "Hash computation failed - Path: {}, Error: {}",
+            $path.display(),
+            $error
+        );
+    };
 }
 
-/// Helper function to parse error messages to extract type and details
-fn parse_error_message(error_msg: &str) -> (&str, &str) {
-    // Common error patterns
-    if error_msg.contains("I/O error:") {
-        let parts: Vec<&str> = error_msg.splitn(2, "I/O error:").collect();
-        if parts.len() == 2 {
-            return ("I/O error", parts[1].trim());
-        }
-    } else if error_msg.contains("Timeout") || error_msg.contains("timed out") {
-        return ("Timeout", error_msg);
-    } else if error_msg.contains("Permission denied") {
-        return ("Permission denied", error_msg);
-    } else if error_msg.contains("Perceptual hash") {
-        return ("Perceptual hash", error_msg);
-    }
-    
-    // Default case - keep the whole message
-    ("error", error_msg)
+// Functions for backward compatibility
+// These will use the caller location of these functions rather than the original caller
+pub fn log_file_error(path: &Path, operation: &str, error: &dyn std::error::Error) {
+    log_file_error!(path, operation, error);
+}
+
+pub fn log_hash_error<E: std::fmt::Display>(path: &Path, error: E) {
+    log_hash_error!(path, error);
 }
 
 /// Log file system modification
+///
+/// This macro captures the caller's file, line, and module info
+#[macro_export]
+macro_rules! log_fs_modification {
+    ($operation:expr, $path:expr, $details:expr) => {
+        log::info!(
+            target: module_path!(),
+            "FS CHANGE - Operation: {}, Path: {}{}",
+            $operation,
+            $path.display(),
+            if let Some(details_str) = $details {
+                format!(", Details: {}", details_str)
+            } else {
+                String::new()
+            }
+        );
+    };
+}
+
+// Function for backward compatibility
 pub fn log_fs_modification(operation: &str, path: &Path, details: Option<&str>) {
-    let details_str = details.unwrap_or("");
-    info!(
-        "FS CHANGE - Operation: {}, Path: {}{}",
-        operation,
-        path.display(),
-        if details_str.is_empty() {
-            "".to_string()
-        } else {
-            format!(", Details: {}", details_str)
-        }
-    );
+    log_fs_modification!(operation, path, details);
 }
 
 /// Send a log directly to BetterStack bypassing the standard logging
 /// Useful for critical events or when the logger isn't properly initialized
-pub fn send_direct_betterstack_log(
-    message: &str, 
-    level: &str, 
-    operation: Option<&str>, 
-    path: Option<&str>, 
-    error_type: Option<&str>, 
-    details: Option<&str>
+#[macro_export]
+macro_rules! send_direct_betterstack_log {
+    ($message:expr, $level:expr, $operation:expr, $path:expr, $error_type:expr, $details:expr) => {
+        crate::logging::_send_direct_betterstack_log(
+            $message,
+            $level,
+            $operation,
+            $path,
+            $error_type,
+            $details,
+            module_path!(),
+            file!(),
+            line!(),
+        )
+    };
+}
+// Internal implementation function not meant to be called directly
+// Users should use the send_direct_betterstack_log macro instead
+pub fn _send_direct_betterstack_log(
+    message: &str,
+    level: &str,
+    operation: Option<&str>,
+    path: Option<&str>,
+    error_type: Option<&str>,
+    details: Option<&str>,
+    module: &str,
+    file: &str,
+    line: u32,
 ) -> Result<()> {
     // Create a timestamp in UTC
     let now = chrono::Utc::now().format("%Y-%m-%d %T UTC").to_string();
@@ -308,23 +369,43 @@ pub fn send_direct_betterstack_log(
     let err_type = error_type.unwrap_or("application");
     let err_details = details.unwrap_or(message);
 
-    // Prepare the structured JSON payload
-    let payload = json!({
-        "dt": now,
-        "message": format!("{} event on {}: {}", err_type, path_str, err_details),
+    // Create formatted message
+    let formatted_message = format!(
+        "{} event on {}: {}",
+        err_type,
+        if path_str.is_empty() {
+            "system"
+        } else {
+            path_str
+        },
+        err_details
+    );
+
+    // Build the data object with all structured fields
+    let data = json!({
         "raw_message": message,
-        "summary": format!("{} event{}", 
-                          err_type, 
-                          if path_str.is_empty() { "".to_string() } else { format!(" on {}", path_str) }),
+        "formatted_message": formatted_message,
+        "context": {
+            "source": {
+                "module": module,
+                "file": file,
+                "line": line
+            },
+            "operation": op,
+            "path": path_str,
+            "error": {
+                "type": err_type,
+                "details": err_details
+            },
+            "timestamp": now,
+            "direct": true
+        }
+    });
+
+    // Prepare the structured JSON payload according to BetterStack format
+    let payload = json!({
         "level": level,
-        "source_module": "direct",
-        "source_file": "manual_log",
-        "source_line": 0,
-        "operation": op,
-        "path": path_str,
-        "error_type": err_type,
-        "error_details": err_details,
-        "direct": true
+        "data": data
     });
 
     // Send the log directly
@@ -345,6 +426,20 @@ pub fn send_direct_betterstack_log(
     }
 
     Ok(())
+}
+
+// Backward compatibility function for direct logging
+// This will capture the source location of the caller directly
+pub fn send_direct_betterstack_log(
+    message: &str,
+    level: &str,
+    operation: Option<&str>,
+    path: Option<&str>,
+    error_type: Option<&str>,
+    details: Option<&str>,
+) -> Result<()> {
+    // Call the macro which will capture file, line, and module information from the call site
+    send_direct_betterstack_log!(message, level, operation, path, error_type, details)
 }
 
 /// Shutdown the logger gracefully

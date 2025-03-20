@@ -1,6 +1,6 @@
 use log::info;
-use sysinfo::System;
 use std::time::Instant;
+use sysinfo::System;
 
 /// Simple memory tracking utility
 pub struct MemoryTracker {
@@ -23,19 +23,6 @@ impl MemoryTracker {
         }
     }
 
-    /// Check current memory usage and return (current_usage, diff_from_start)
-    pub fn check_memory(&mut self) -> (u64, u64) {
-        self.system.refresh_memory();
-        let current_mem = self.system.used_memory();
-        let diff = if current_mem > self.start_mem {
-            current_mem - self.start_mem
-        } else {
-            0
-        };
-        
-        (current_mem, diff)
-    }
-
     /// Check and log memory usage if sufficient time has passed
     pub fn log_memory(&mut self, label: &str) -> (u64, u64) {
         self.system.refresh_memory();
@@ -45,7 +32,7 @@ impl MemoryTracker {
         } else {
             0
         };
-        
+
         // Only log if enough time has passed since last check (1 second)
         if self.last_check.elapsed().as_secs() >= 1 {
             info!(
@@ -56,31 +43,7 @@ impl MemoryTracker {
             );
             self.last_check = Instant::now();
         }
-        
+
         (current_mem, diff)
     }
-}
-
-/// Log memory before and after a batch operation
-pub fn log_batch_memory(
-    batch_idx: usize, 
-    system: &mut System, 
-    before_mem: u64
-) -> (u64, i64) {
-    system.refresh_memory();
-    let after_mem = system.used_memory();
-    let mem_change = (after_mem as i64 - before_mem as i64) / 1024 / 1024;
-    
-    info!(
-        "Memory after batch {}: {}MB ({}MB change)",
-        batch_idx + 1,
-        after_mem / 1024 / 1024,
-        if mem_change >= 0 { 
-            format!("+{}", mem_change) 
-        } else { 
-            format!("{}", mem_change) 
-        }
-    );
-    
-    (after_mem, mem_change)
 }

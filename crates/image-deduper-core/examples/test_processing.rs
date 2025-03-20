@@ -1,7 +1,3 @@
-/// Demonstrates the processing of images in a directory.
-use std::path::PathBuf;
-
-use image_deduper_core::get_project_root;
 use image_deduper_core::logging;
 use image_deduper_core::logging::shutdown_logger;
 use image_deduper_core::Config;
@@ -9,6 +5,8 @@ use image_deduper_core::ImageDeduper;
 use image_deduper_core::LogLevel;
 use image_deduper_core::PriorityRule;
 use image_deduper_core::Result;
+/// Demonstrates the processing of images in a directory.
+use std::path::PathBuf;
 
 fn main() -> Result<()> {
     logging::init_logger()?;
