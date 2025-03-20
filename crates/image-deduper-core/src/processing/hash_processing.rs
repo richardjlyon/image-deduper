@@ -6,9 +6,9 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
 
-use super::cryptographic::compute_cryptographic;
+use super::crypto_hash::compute_cryptographic;
 use super::file_validation::get_file_extension;
-use super::perceptual::{phash_from_file, process_tiff_directly, PHash};
+use super::perceptual_hash::{phash_from_file, process_tiff_directly, PHash};
 use super::timeout_utils::{
     execute_with_timeout, extract_panic_info, get_timeout_duration, HashOperation,
 };

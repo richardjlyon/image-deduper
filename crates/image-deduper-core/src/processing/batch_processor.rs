@@ -1,3 +1,40 @@
+//! This module provides functionality for processing images in batches, computing cryptographic and perceptual hashes
+//! for each image, and handling errors during the process. It includes configuration options for batch processing, memory
+//! management, and logging.
+//!
+//! # Structures
+//! - `BatchConfig`: Configuration for batch processing, including thread limits and batch sizes.
+//!
+//! # Functions
+//! - `process_single_image`: Processes a single image, computing both cryptographic and perceptual hashes, and handles errors.
+//! - `process_image_batch`: Processes a batch of images in parallel, computes their hashes, and returns the results
+//!    along with the error count.
+//! - `process_images_in_batches`: Processes images in sequential batches to manage memory usage effectively.
+//! - `process_images`: A simple wrapper for backward compatibility that processes images using a default batch size.
+//!
+//! # Usage
+//! This module is designed to handle large sets of images efficiently by processing them in batches and using parallel
+//! computation where possible. It also includes detailed logging and memory management to ensure smooth operation even with large datasets.
+//!
+//! # Example
+//! ```rust
+//! use std::path::PathBuf;
+//! use std::sync::Arc;
+//! use std::sync::atomic::AtomicUsize;
+//!
+//! let images: Vec<PathBuf> = vec![
+//!     PathBuf::from("image1.jpg"),
+//!     PathBuf::from("image2.jpg"),
+//!     // Add more image paths
+//! ];
+//!
+//! let progress_counter = Arc::new(AtomicUsize::new(0));
+//! let results = process_images_in_batches(&images, 50, Some(&progress_counter));
+//!
+//! for result in results {
+//!     println!("Processed image: {:?}", result.path);
+//! }
+
 use crate::log_hash_error;
 use log::info;
 use rayon::prelude::*;

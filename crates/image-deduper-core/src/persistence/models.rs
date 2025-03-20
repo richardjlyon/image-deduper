@@ -3,7 +3,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::processing::perceptual::PHash;
+use crate::processing::perceptual_hash::PHash;
 use crate::types::{ImageFile, ImageFormat};
 
 /// Representation of a stored image with its hashes

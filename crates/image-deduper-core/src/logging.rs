@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use log::{info, LevelFilter, Record};
-use std::path::Path;
+use log4rs::append::console::{ConsoleAppender, Target};
 use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::Duration; // Required for log4rs's Append trait
@@ -242,11 +242,26 @@ pub fn init_logger() -> Result<()> {
     let betterstack_encoder = Box::new(PatternEncoder::new("[{l}] [{M}:{L}] - {m}"));
     let betterstack_appender = BetterStackAppender::new(betterstack_encoder, betterstack_level);
 
+    // Create a console appender
+    let console_encoder = Box::new(PatternEncoder::new("[{l}] [{M}:{L}] - {m}\n"));
+    let console_appender = ConsoleAppender::builder()
+        .encoder(console_encoder)
+        .target(Target::Stdout)
+        .build();
+
     // Build the logger configuration with only BetterStack appender
     let config = Config::builder()
         .appender(Appender::builder().build("betterstack", Box::new(betterstack_appender)))
-        .build(Root::builder().appender("betterstack").build(level))
+        .appender(Appender::builder().build("console", Box::new(console_appender)))
+        .build(
+            Root::builder()
+                .appender("betterstack")
+                .appender("console")
+                .build(level),
+        )
         .map_err(|e| Error::Unknown(format!("Failed to build log config: {}", e)))?;
+
+    println!("->> logger config created");
 
     // Use the configured logger
     log4rs::init_config(config)
@@ -294,16 +309,6 @@ macro_rules! log_hash_error {
     };
 }
 
-// Functions for backward compatibility
-// These will use the caller location of these functions rather than the original caller
-// pub fn log_file_error(path: &Path, operation: &str, error: &dyn std::error::Error) {
-//     log_file_error!(path, operation, error);
-// }
-
-// pub fn log_hash_error<E: std::fmt::Display>(path: &Path, error: E) {
-//     log_hash_error!(path, error);
-// }
-
 /// Log file system modification
 ///
 /// This macro captures the caller's file, line, and module info
@@ -324,9 +329,19 @@ macro_rules! log_fs_modification {
     };
 }
 
-// Function for backward compatibility
-pub fn log_fs_modification(operation: &str, path: &Path, details: Option<&str>) {
-    log_fs_modification!(operation, path, details);
+/// Log database operations
+///
+/// This macro captures the caller's file, line, and module info
+#[macro_export]
+macro_rules! log_db_operation {
+    ($operation:expr, $details:expr) => {
+        log::info!(
+            target: module_path!(),
+            "DB OPERATION - Operation: {}, Details: {}",
+            $operation,
+            $details
+        );
+    };
 }
 
 /// Send a log directly to BetterStack bypassing the standard logging

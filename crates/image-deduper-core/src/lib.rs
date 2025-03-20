@@ -9,7 +9,6 @@
 // -- External Dependencies --
 
 use log::{info, warn};
-use persistence::diagnose_database;
 use rocksdb::DB;
 
 // -- Standard Library --
@@ -166,37 +165,28 @@ impl ImageDeduper {
 
     /// Hash and persist all images in the provided directories
     pub fn hash_and_persist(&self, image_files: &[ImageFile], force_rescan: bool) -> Result<()> {
-        println!("->> hash_and_persist called...");
-
-        // Get current database stats
-        let (current_db_count, _) = self.get_db_stats()?;
-        println!(
-            "->> Starting with {} images already in database",
-            current_db_count
-        );
-
         // Perform a database diagnosis
-        diagnose_database(&self.db)?;
+        // diagnose_database(&self.db)?;
 
         // Get image paths from ImageFile objects
         let image_paths: Vec<PathBuf> = image_files.iter().map(|img| img.path.clone()).collect();
 
         // Determine which images need processing
         let paths_to_process = if force_rescan {
-            println!(
-                "->> Force rescan requested - processing all {} images",
+            info!(
+                "Force rescan requested - processing all {} images",
                 image_paths.len()
             );
             image_paths
         } else {
             // Filter out images already in database
             let new_paths = persistence::filter_new_images(&self.db, &image_paths)?;
-            println!("->> Found {} new images to process", new_paths.len());
+            info!("Found {} new images to process", new_paths.len());
             new_paths
         };
 
         if paths_to_process.is_empty() {
-            println!("No new images to process");
+            info!("No new images to process");
             return Ok(());
         }
 
@@ -207,6 +197,13 @@ impl ImageDeduper {
         // Create a smaller batch size for more frequent checkpoints and better resource management
         let effective_batch_size = std::cmp::min(BATCH_SIZE, 10);
 
+        // Get current database stats
+        let (current_db_count, _) = self.get_db_stats()?;
+        info!(
+            "Starting processing with {} images already in database",
+            current_db_count
+        );
+
         // Get stats for the progress tracker
         let already_processed = current_db_count;
         let total_images = image_files.len();
@@ -216,8 +213,8 @@ impl ImageDeduper {
         // Create progress tracker with:
         // - Total = already in DB + total images passed in
         // - Initial position = already in DB
-        print!(
-            "->> Starting process counter: {} {} {}",
+        info!(
+            "Starting process counter: {} {} {}",
             total_images, already_processed, already_processed
         );
         let progress =
@@ -233,6 +230,7 @@ impl ImageDeduper {
         // Process images in smaller batches to manage memory usage
         for (batch_idx, image_batch) in paths_to_process.chunks(effective_batch_size).enumerate() {
             // Update progress tracker for new batch
+
             progress.start_batch(image_batch.len(), batch_idx + 1, total_batches);
 
             // Update memory stats before processing
@@ -414,11 +412,11 @@ impl ImageDeduper {
 
         // Log final stats to file
         info!("Processing completed:");
-        info!("  - Total processed: {}", total_processed);
-        info!("  - Successful: {}", total_successful);
-        info!("  - Errors: {}", total_errors);
-        info!("  - New entries in database: {}", new_entries);
-        info!("  - Peak memory usage: {}MB", self.memory_tracker.peak_mb());
+        info!("- Total processed: {}", total_processed);
+        info!("- Successful: {}", total_successful);
+        info!("- Errors: {}", total_errors);
+        info!("- New entries in database: {}", new_entries);
+        info!("- Peak memory usage: {}MB", self.memory_tracker.peak_mb());
 
         Ok(())
     }

@@ -4,7 +4,7 @@
 //! perceptual hash algorithms for image comparison. It achieves
 //! significant performance improvements over CPU-based methods.
 
-use crate::processing::perceptual::PHash;
+use crate::processing::perceptual_hash::PHash;
 use image::{DynamicImage, GenericImageView};
 use metal::{Device, MTLResourceOptions, MTLSize};
 use objc::rc::autoreleasepool;
@@ -25,79 +25,79 @@ kernel void calculate_phash(
 {
     // Multi-threaded version - multiple threads process the image together
     uint thread_index = thread_position_in_grid.y * grid_size.x + thread_position_in_grid.x;
-    
+
     // We use 16 threads to process different parts of the 32x32 grid
     if (thread_index >= 16)
         return;
-        
+
     // Get input dimensions for downsampling
     uint width = input.get_width();
     uint height = input.get_height();
-    
+
     // Create a 32x32 grid of grayscale values for enhanced hashing
     // Each thread works on 1/16th of the grid (64 pixels)
     float gray_pixels[64];
-    
+
     // Figure out which part of the 32x32 grid this thread is responsible for
     uint start_idx = thread_index * 64;
     uint end_idx = start_idx + 64;
-    
+
     // Process 64 pixels for this thread
     for (uint i = 0; i < 64; i++) {
         uint pixel_idx = start_idx + i;
         uint grid_x = pixel_idx % 32;
         uint grid_y = pixel_idx / 32;
-        
+
         // We're filling a 32x32 grid - skip pixels beyond our bounds
         if (grid_y >= 32) continue;
-        
+
         // Calculate region to sample using box filtering
         uint start_x = (grid_x * width) / 32;
         uint end_x = ((grid_x + 1) * width) / 32;
         uint start_y = (grid_y * height) / 32;
         uint end_y = ((grid_y + 1) * height) / 32;
-        
+
         // Calculate step sizes for efficient sampling
         uint step_x = max(1u, (end_x - start_x) / 2);
         uint step_y = max(1u, (end_y - start_y) / 2);
-        
+
         // Sample pixels at regular intervals
         float sum_gray = 0.0;
         uint count = 0;
-        
+
         for (uint py = start_y; py < end_y; py += step_y) {
             for (uint px = start_x; px < end_x; px += step_x) {
                 // Read pixel
                 float4 pixel = input.read(uint2(min(px, width-1), min(py, height-1)));
-                
+
                 // Convert to grayscale using exact same weights as CPU (0.299R + 0.587G + 0.114B)
                 sum_gray += 0.299 * pixel.r + 0.587 * pixel.g + 0.114 * pixel.b;
                 count++;
             }
         }
-        
+
         // Average and store
         float gray = (count > 0) ? (sum_gray / float(count)) : 0.0;
         gray_pixels[i] = gray;
     }
-    
+
     // Calculate mean of the 64 grayscale values for this thread's part
     float sum = 0.0;
     for (uint i = 0; i < 64; i++) {
         sum += gray_pixels[i];
     }
     float local_mean = sum / 64.0;
-    
+
     // Build hash for this thread's part by comparing each value to mean
     ulong hash = 0;
-    
+
     // Each bit in this 64-bit hash represents one pixel comparison
     for (uint i = 0; i < 64; i++) {
         if (gray_pixels[i] > local_mean) {
             hash |= 1UL << i;
         }
     }
-    
+
     // Save the result to the appropriate position in the output buffer
     result[thread_index] = hash;
 }
@@ -162,7 +162,7 @@ impl MetalContext {
         // This is a threshold where GPU overhead outweighs benefits
         let (width, height) = img.dimensions();
         if width < 1024 && height < 1024 {
-            return crate::processing::perceptual::calculate_phash(img);
+            return crate::processing::perceptual_hash::calculate_phash(img);
         }
 
         autoreleasepool(|| {
@@ -301,12 +301,12 @@ pub fn gpu_accelerated_phash(img: &DynamicImage) -> PHash {
 
     // For small images, use standard CPU hash
     if width < 1024 && height < 1024 {
-        return crate::processing::perceptual::calculate_phash(img);
+        return crate::processing::perceptual_hash::calculate_phash(img);
     }
 
     // For larger images, we can optionally resize them first to reduce processing time
     // But for GPU processing, we prefer to use the full resolution image if possible
-    
+
     // For larger images with GPU, use enhanced hash
     if let Some(hash) = metal_phash(img) {
         return hash; // Enhanced 1024-bit hash
@@ -318,9 +318,10 @@ pub fn gpu_accelerated_phash(img: &DynamicImage) -> PHash {
         // For extremely large images on CPU, resize to 1024px max dimension
         log::info!(
             "Resizing very large image ({}x{}) for CPU perceptual hash computation",
-            width, height
+            width,
+            height
         );
-        
+
         // Calculate target dimensions maintaining aspect ratio
         let (target_width, target_height) = if width > height {
             let scale = 1024.0 / width as f32;
@@ -329,19 +330,19 @@ pub fn gpu_accelerated_phash(img: &DynamicImage) -> PHash {
             let scale = 1024.0 / height as f32;
             ((width as f32 * scale).round() as u32, 1024)
         };
-        
+
         // Resize the image
         let resized = img.resize(
-            target_width, 
-            target_height, 
-            image::imageops::FilterType::Lanczos3
+            target_width,
+            target_height,
+            image::imageops::FilterType::Lanczos3,
         );
-        
-        return crate::processing::perceptual::calculate_phash(&resized);
+
+        return crate::processing::perceptual_hash::calculate_phash(&resized);
     }
 
     // For moderately large images, use standard CPU hash directly
-    crate::processing::perceptual::calculate_phash(img)
+    crate::processing::perceptual_hash::calculate_phash(img)
 }
 
 /// Calculate a perceptual hash from an image file with GPU acceleration if available
@@ -350,7 +351,7 @@ pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
     // Try to efficiently get image dimensions without loading the whole image
     let path_ref = path.as_ref();
     let reader = image::io::Reader::open(path_ref);
-    
+
     // If we can get dimensions efficiently, use them to make resizing decisions
     if let Ok(reader) = reader {
         if let Ok(reader) = reader.with_guessed_format() {
@@ -358,16 +359,18 @@ pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
                 // For small images, load directly and use standard CPU hash
                 if width < 1024 && height < 1024 {
                     let img = image::open(path_ref)?;
-                    return Ok(crate::processing::perceptual::calculate_phash(&img));
+                    return Ok(crate::processing::perceptual_hash::calculate_phash(&img));
                 }
-                
+
                 // For very large images (especially if GPU isn't available), resize before loading
                 if width > 8192 || height > 8192 {
                     log::info!(
                         "Pre-resizing extremely large image ({}x{}) for hash computation: {}",
-                        width, height, path_ref.display()
+                        width,
+                        height,
+                        path_ref.display()
                     );
-                    
+
                     // Calculate target dimensions maintaining aspect ratio
                     let (target_width, target_height) = if width > height {
                         let scale = 2048.0 / width as f32;
@@ -376,39 +379,41 @@ pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
                         let scale = 2048.0 / height as f32;
                         ((width as f32 * scale).round() as u32, 2048)
                     };
-                    
+
                     // Load image with resize filter to drastically reduce memory usage
                     if let Ok(img) = image::open(path_ref) {
                         let resized = img.resize(
-                            target_width, 
-                            target_height, 
-                            image::imageops::FilterType::Triangle // Faster filter for very large images
+                            target_width,
+                            target_height,
+                            image::imageops::FilterType::Triangle, // Faster filter for very large images
                         );
-                        
+
                         // Try GPU hash first on resized image
                         if let Some(hash) = metal_phash(&resized) {
                             return Ok(hash);
                         }
-                        
+
                         // Fall back to CPU implementation on resized image
-                        return Ok(crate::processing::perceptual::calculate_phash(&resized));
+                        return Ok(crate::processing::perceptual_hash::calculate_phash(
+                            &resized,
+                        ));
                     }
                 }
             }
         }
     }
-    
+
     // Standard image opening logic for normal-sized images
     let img = image::open(path_ref)?;
-    
+
     // Get image dimensions
     let (width, height) = img.dimensions();
-    
+
     // For small images, use standard CPU hash
     if width < 1024 && height < 1024 {
-        return Ok(crate::processing::perceptual::calculate_phash(&img));
+        return Ok(crate::processing::perceptual_hash::calculate_phash(&img));
     }
-    
+
     // For larger images with GPU, use enhanced hash (1024-bit)
     if let Some(hash) = metal_phash(&img) {
         Ok(hash)
@@ -417,9 +422,10 @@ pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
         if width > 4096 || height > 4096 {
             log::info!(
                 "Resizing large image ({}x{}) for CPU hash computation",
-                width, height
+                width,
+                height
             );
-            
+
             // Calculate target dimensions maintaining aspect ratio
             let (target_width, target_height) = if width > height {
                 let scale = 1024.0 / width as f32;
@@ -428,18 +434,20 @@ pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
                 let scale = 1024.0 / height as f32;
                 ((width as f32 * scale).round() as u32, 1024)
             };
-            
+
             // Resize the image
             let resized = img.resize(
-                target_width, 
-                target_height, 
-                image::imageops::FilterType::Lanczos3
+                target_width,
+                target_height,
+                image::imageops::FilterType::Lanczos3,
             );
-            
-            return Ok(crate::processing::perceptual::calculate_phash(&resized));
+
+            return Ok(crate::processing::perceptual_hash::calculate_phash(
+                &resized,
+            ));
         }
-        
+
         // Fall back to CPU implementation
-        Ok(crate::processing::perceptual::calculate_phash(&img))
+        Ok(crate::processing::perceptual_hash::calculate_phash(&img))
     }
 }

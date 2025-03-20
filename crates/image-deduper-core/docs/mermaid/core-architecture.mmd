@@ -1,0 +1,39 @@
+```mermaid
+flowchart TB
+    User[User/Client] --> ImgDeduper[ImageDeduper Main Class]
+
+    subgraph "Core Components"
+        ImgDeduper --> Discovery[Discovery Module]
+        ImgDeduper --> Processing[Processing Module]
+        ImgDeduper --> Persistence[Persistence Module]
+        ImgDeduper --> Action[Action Module]
+        ImgDeduper --> Safety[Safety Module]
+    end
+
+    subgraph "Discovery Flow"
+        Discovery --> |Find Images| ImageFiles[Image Files]
+        Discovery --> |Extract Metadata| Metadata[File Metadata]
+    end
+
+    subgraph "Processing Flow"
+        Processing --> |Generate| CryptoHash[Cryptographic Hash]
+        Processing --> |Generate| PerceptualHash[Perceptual Hash]
+        Processing --> |Using| GPU[GPU Acceleration]
+        Processing --> |Track| Progress[Progress Tracker]
+    end
+
+    subgraph "Persistence Flow"
+        Persistence --> |Store| RocksDB[RocksDB Database]
+        RocksDB --> |Query| DuplicateCheck[Duplicate Check]
+    end
+
+    subgraph "Action Flow"
+        Action --> |Handle Duplicates| Move[Move]
+        Action --> |Handle Duplicates| Delete[Delete]
+        Action --> |Handle Duplicates| Symlink[Create Symlink]
+    end
+
+    ImageFiles --> Processing
+    Processing --> |Results| Persistence
+    DuplicateCheck --> Action
+```

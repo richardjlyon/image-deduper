@@ -1,3 +1,6 @@
+//! This module provides utility functions for file validation and processing.
+//! It includes functions to check if a file exists, validate its size, and retrieve its extension.
+
 use crate::log_file_error;
 use log::info;
 use std::path::Path;

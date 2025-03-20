@@ -1,6 +1,6 @@
+use super::perceptual_hash::PHash;
 use blake3::Hash as Blake3Hash;
 use std::path::PathBuf;
-use super::perceptual::PHash;
 
 /// Result of processing a single image
 #[derive(Debug, Clone)]

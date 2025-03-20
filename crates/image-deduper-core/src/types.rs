@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 use sysinfo::System;
 
-use crate::processing::perceptual::PHash;
+use crate::processing::perceptual_hash::PHash;
 
 /// Supported image formats
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -135,7 +135,7 @@ pub fn filter_new_images(db: &DB, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     use rayon::prelude::*;
     use std::time::Instant;
 
-    println!("Starting to filter {} paths for new images...", paths.len());
+    info!("Starting to filter {} paths for new images...", paths.len());
     let start_time = Instant::now();
 
     // Use smaller chunks for better feedback
@@ -143,15 +143,15 @@ pub fn filter_new_images(db: &DB, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut new_paths = Vec::new();
 
     // Process in chunks to show progress
-    for (chunk_idx, chunk) in paths.chunks(CHUNK_SIZE).enumerate() {
-        println!(
-            "Checking chunk {}/{} ({} paths)...",
-            chunk_idx + 1,
-            (paths.len() + CHUNK_SIZE - 1) / CHUNK_SIZE,
-            chunk.len()
-        );
+    for (_chunk_idx, chunk) in paths.chunks(CHUNK_SIZE).enumerate() {
+        // println!(
+        //     "Checking chunk {}/{} ({} paths)...",
+        //     chunk_idx + 1,
+        //     (paths.len() + CHUNK_SIZE - 1) / CHUNK_SIZE,
+        //     chunk.len()
+        // );
 
-        let chunk_start = Instant::now();
+        // let chunk_start = Instant::now();
         let chunk_new_paths: Vec<PathBuf> = chunk
             .par_iter()
             .filter_map(|path| match check_hashes(db, path) {
@@ -160,19 +160,19 @@ pub fn filter_new_images(db: &DB, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
             })
             .collect();
 
-        let chunk_duration = chunk_start.elapsed();
-        println!(
-            "Found {} new images in chunk {} (took {:.2}s)",
-            chunk_new_paths.len(),
-            chunk_idx + 1,
-            chunk_duration.as_secs_f64()
-        );
+        // let chunk_duration = chunk_start.elapsed();
+        // println!(
+        //     "Found {} new images in chunk {} (took {:.2}s)",
+        //     chunk_new_paths.len(),
+        //     chunk_idx + 1,
+        //     chunk_duration.as_secs_f64()
+        // );
 
         new_paths.extend(chunk_new_paths);
     }
 
     let duration = start_time.elapsed();
-    println!("Filtering completed in {:.2}s", duration.as_secs_f64());
+    info!("Filtering completed in {:.2}s", duration.as_secs_f64());
     info!(
         "Found {} new images out of {} total",
         new_paths.len(),

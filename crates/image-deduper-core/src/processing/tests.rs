@@ -1,7 +1,7 @@
 #[allow(clippy::module_inception)]
 #[cfg(test)]
 mod tests {
-    use crate::processing::perceptual::{phash_from_file, PHash};
+    use crate::processing::perceptual_hash::{phash_from_file, PHash};
     use crate::processing::{compute_cryptographic, process_images};
     use crate::test_utils::test_support::test_image_registry::TEST_IMAGES;
     // Use the test image registry from test_support
@@ -133,8 +133,8 @@ mod tests {
 
         let phash_img1 = phash_from_file(&img1).unwrap();
         let phash_img2 = phash_from_file(&img2).unwrap();
-
         let distance = phash_img1.distance(&phash_img2);
+
         println!("phash_img1: {:?}", phash_img1);
         println!("phash_img2: {:?}", phash_img2);
         println!("distance: {:?}", distance);

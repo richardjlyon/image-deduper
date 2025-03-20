@@ -1,4 +1,4 @@
-use image_deduper_core::processing::{metal_phash, perceptual};
+use image_deduper_core::processing::{metal_phash, perceptual_hash};
 use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -93,7 +93,7 @@ fn run_batch_test(images: &[PathBuf]) {
     let mut cpu_hashes = Vec::new();
 
     for img in &loaded_images {
-        cpu_hashes.push(perceptual::calculate_phash(img));
+        cpu_hashes.push(perceptual_hash::calculate_phash(img));
     }
 
     let cpu_duration = cpu_start.elapsed();
@@ -139,7 +139,7 @@ fn run_batch_test(images: &[PathBuf]) {
 
         for i in 0..gpu_hashes.len().min(cpu_hashes.len()) {
             let distance = match (&gpu_hashes[i], &cpu_hashes[i]) {
-                (perceptual::PHash::Standard(a), perceptual::PHash::Standard(b)) => {
+                (perceptual_hash::PHash::Standard(a), perceptual_hash::PHash::Standard(b)) => {
                     (a ^ b).count_ones()
                 }
                 _ => 0, // Handle other cases if needed
@@ -182,7 +182,7 @@ fn run_batch_test(images: &[PathBuf]) {
             let img = image::DynamicImage::ImageRgb8(test_image);
 
             // Warm up
-            let _ = perceptual::calculate_phash(&img);
+            let _ = perceptual_hash::calculate_phash(&img);
             let _ = metal_phash::metal_phash(&img);
 
             // Run multiple iterations for more accurate timing
@@ -190,9 +190,9 @@ fn run_batch_test(images: &[PathBuf]) {
 
             // CPU timing
             let cpu_start = Instant::now();
-            let mut cpu_hash = perceptual::PHash::Standard(0);
+            let mut cpu_hash = perceptual_hash::PHash::Standard(0);
             for _ in 0..ITERATIONS {
-                cpu_hash = perceptual::calculate_phash(&img);
+                cpu_hash = perceptual_hash::calculate_phash(&img);
             }
             let cpu_time = cpu_start.elapsed() / ITERATIONS;
 
@@ -206,7 +206,7 @@ fn run_batch_test(images: &[PathBuf]) {
 
             if let Some(hash) = gpu_hash {
                 let distance = match (&cpu_hash, &hash) {
-                    (perceptual::PHash::Standard(a), perceptual::PHash::Standard(b)) => {
+                    (perceptual_hash::PHash::Standard(a), perceptual_hash::PHash::Standard(b)) => {
                         (a ^ b).count_ones()
                     }
                     _ => 0, // Handle other cases if needed
@@ -252,21 +252,21 @@ fn run_batch_test(images: &[PathBuf]) {
 
                 // Warm up
                 for img in &batch {
-                    let _ = perceptual::calculate_phash(img);
+                    let _ = perceptual_hash::calculate_phash(img);
                     let _ = metal_phash::metal_phash(img);
                 }
 
                 // CPU batch timing - sequential
                 let cpu_start_seq = Instant::now();
                 for img in &batch {
-                    let _ = perceptual::calculate_phash(img);
+                    let _ = perceptual_hash::calculate_phash(img);
                 }
                 let cpu_time_seq = cpu_start_seq.elapsed();
 
                 // CPU batch timing - parallel
                 let cpu_start_par = Instant::now();
                 batch.par_iter().for_each(|img| {
-                    let _ = perceptual::calculate_phash(img);
+                    let _ = perceptual_hash::calculate_phash(img);
                 });
                 let cpu_time_par = cpu_start_par.elapsed();
 
