@@ -9,7 +9,7 @@
 // -- External Dependencies --
 
 use log::{info, warn};
-use rocksdb::DB;
+use persistence::ImageHashDB;
 
 // -- Standard Library --
 use std::path::PathBuf;
@@ -61,7 +61,7 @@ pub fn get_default_db_path() -> PathBuf {
 /// Main entry point for the deduplication process
 pub struct ImageDeduper {
     config: Config,
-    db: DB,
+    db: ImageHashDB,
     _safety_manager: safety::SafetyManager,
     _shutdown_requested: Arc<AtomicBool>,
     memory_tracker: Arc<MemoryTracker>,
@@ -70,9 +70,9 @@ pub struct ImageDeduper {
 impl ImageDeduper {
     /// Create a new ImageDeduper with the provided configuration
     pub fn new(config: Config) -> Self {
-        // Configure Rayon thread pool with fewer threads to prevent resource exhaustion
         let cpu_count = num_cpus::get();
-        let thread_count = std::cmp::min(cpu_count, 8); // Cap at 8 threads to prevent too many file handles
+        // Cap at 8 threads to prevent too many file handles
+        let thread_count = std::cmp::min(cpu_count, 8);
 
         rayon::ThreadPoolBuilder::new()
             .num_threads(thread_count)
@@ -95,16 +95,17 @@ impl ImageDeduper {
             }
         }
 
-        let db = persistence::rocksdb(&config).unwrap();
-        let _safety_manager = safety::SafetyManager::new(&config);
+        let db = ImageHashDB::new("test_images");
         let memory_tracker = Arc::new(MemoryTracker::new());
+        let _safety_manager = safety::SafetyManager::new(&config);
+        let _shutdown_requested = Arc::new(AtomicBool::new(false));
 
         Self {
             config,
             db,
-            _safety_manager,
-            _shutdown_requested: Arc::new(AtomicBool::new(false)),
             memory_tracker,
+            _safety_manager,
+            _shutdown_requested,
         }
     }
 
@@ -141,11 +142,6 @@ impl ImageDeduper {
         }
     }
 
-    /// Get statistics about the database contents
-    pub fn get_db_stats(&self) -> Result<(usize, usize)> {
-        persistence::get_db_stats(&self.db)
-    }
-
     /// Discover all images in the provided directories
     pub fn discover_images(
         &self,
@@ -165,7 +161,11 @@ impl ImageDeduper {
     }
 
     /// Hash and persist all images in the provided directories
-    pub fn hash_and_persist(&self, image_files: &[ImageFile], force_rescan: bool) -> Result<()> {
+    pub fn hash_and_persist(
+        &self,
+        image_files: &[ImageFile],
+        force_rescan: bool,
+    ) -> Result<(usize, usize)> {
         // Perform a database diagnosis
         // diagnose_database(&self.db)?;
 
@@ -181,14 +181,14 @@ impl ImageDeduper {
             image_paths
         } else {
             // Filter out images already in database
-            let new_paths = persistence::filter_new_images(&self.db, &image_paths)?;
+            let new_paths = self.db.filter_new_images(&image_paths)?;
             info!("Found {} new images to process", new_paths.len());
             new_paths
         };
 
         if paths_to_process.is_empty() {
             info!("No new images to process");
-            return Ok(());
+            return Ok(self.db.get_db_stats()?);
         }
 
         // Choose a smaller batch size to prevent file handle exhaustion
@@ -199,7 +199,7 @@ impl ImageDeduper {
         let effective_batch_size = std::cmp::min(BATCH_SIZE, 10);
 
         // Get current database stats
-        let (current_db_count, _) = self.get_db_stats()?;
+        let (current_db_count, _) = self.db.get_db_stats()?;
         info!(
             "Starting processing with {} images already in database",
             current_db_count
@@ -310,7 +310,7 @@ impl ImageDeduper {
                 let mut write_opts = rocksdb::WriteOptions::default();
                 write_opts.set_sync(batch_idx % 5 == 0); // Periodically force sync
 
-                match persistence::batch_insert_hashes(&self.db, &batch_results.0) {
+                match self.db.batch_insert_hashes(&batch_results.0) {
                     Ok(_) => {
                         info!("Successfully inserted {} records", batch_results.0.len());
                     }
@@ -335,7 +335,6 @@ impl ImageDeduper {
             // Perform database maintenance more frequently
             if batch_idx % 5 == 0 && batch_idx > 0 {
                 info!("Performing database maintenance...");
-                // Flush memtable to disk
                 match self.db.flush() {
                     Ok(_) => info!("Database flushed successfully"),
                     Err(e) => warn!("Database flush error: {}", e),
@@ -360,7 +359,7 @@ impl ImageDeduper {
                 info!("Performing full database maintenance...");
 
                 // Compact the database to reclaim space
-                self.db.compact_range::<&[u8], &[u8]>(None, None);
+                self.db.compact_range();
                 info!("Database compaction complete");
 
                 // Check memory after compaction
@@ -382,7 +381,7 @@ impl ImageDeduper {
         }
 
         // Final database maintenance
-        match persistence::maintain_database(&self.db) {
+        match self.db.maintain_database() {
             Ok(_) => info!("Final database maintenance completed successfully"),
             Err(e) => warn!("Final database maintenance error: {}. Continuing...", e),
         }
@@ -404,7 +403,7 @@ impl ImageDeduper {
         progress.finish(total_successful, total_errors);
 
         // Gather final database statistics
-        let (final_db_count, _) = match self.get_db_stats() {
+        let (final_db_count, _) = match self.db.get_db_stats() {
             Ok(stats) => stats,
             Err(_) => (0, 0), // Couldn't determine stats
         };
@@ -419,7 +418,7 @@ impl ImageDeduper {
         info!("- New entries in database: {}", new_entries);
         info!("- Peak memory usage: {}MB", self.memory_tracker.peak_mb());
 
-        Ok(())
+        Ok(self.db.get_db_stats()?)
     }
 }
 

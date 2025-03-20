@@ -5,7 +5,7 @@ use crate::ImageFile;
 /// Takes a vector of ImageData structs and returns a vector of vectors, where each inner
 /// vector contains ImageData with identical cryptographic hashes.
 /// Only groups with 2 or more images (potential duplicates) are included in the result.
-fn find_duplicate_images(images: Vec<ImageFile>) -> Vec<Vec<ImageFile>> {
+fn _find_duplicate_images(_images: Vec<ImageFile>) -> Vec<Vec<ImageFile>> {
     todo!()
 }
 

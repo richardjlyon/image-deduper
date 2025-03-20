@@ -27,7 +27,8 @@ fn run_app() -> Result<()> {
     println!("Initializing image deduplication process...");
     println!("Press Ctrl+C to gracefully stop processing");
 
-    let source_directory = PathBuf::from("/Volumes/SamsungT9/Mylio_22c15a");
+    // let source_directory = PathBuf::from("/Volumes/SamsungT9/Mylio_22c15a");
+    let source_directory = PathBuf::from("/Users/richardlyon/Desktop/test_images");
 
     let config = Config {
         dry_run: true, // Safe default
@@ -67,10 +68,9 @@ fn run_app() -> Result<()> {
 
     // Use force_rescan=true to process all test images
     info!("Calling hash_and_persist...");
-    let _ = deduper.hash_and_persist(&images, false)?;
+    let (final_pc_count, final_pp_count) = deduper.hash_and_persist(&images, false)?;
 
     // Display final database statistics
-    let (final_pc_count, final_pp_count) = deduper.get_db_stats()?;
     println!("\nFinal database contents:");
     println!("  - Cryptographic hashes: {}", final_pc_count);
     println!("  - Perceptual hashes: {}", final_pp_count);
