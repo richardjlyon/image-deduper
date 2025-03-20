@@ -73,27 +73,28 @@ impl ImageDeduper {
         // Configure Rayon thread pool with fewer threads to prevent resource exhaustion
         let cpu_count = num_cpus::get();
         let thread_count = std::cmp::min(cpu_count, 8); // Cap at 8 threads to prevent too many file handles
-        
+
         rayon::ThreadPoolBuilder::new()
             .num_threads(thread_count)
             .build_global()
             .unwrap();
-            
+
         // Attempt to increase file descriptor limit on Unix platforms
         #[cfg(unix)]
         {
             // Try to set higher file limit if possible
             let _ = Self::increase_file_limit();
-            
+
             // Check current limit for logging
             if let Ok(limits) = rlimit::getrlimit(rlimit::Resource::NOFILE) {
                 log::info!(
                     "File descriptor limits: current={}, maximum={}",
-                    limits.0, limits.1
+                    limits.0,
+                    limits.1
                 );
             }
         }
-        
+
         let db = persistence::rocksdb(&config).unwrap();
         let _safety_manager = safety::SafetyManager::new(&config);
         let memory_tracker = Arc::new(MemoryTracker::new());
@@ -106,7 +107,7 @@ impl ImageDeduper {
             memory_tracker,
         }
     }
-    
+
     /// Try to increase the file descriptor limit on Unix systems
     #[cfg(unix)]
     fn increase_file_limit() -> std::result::Result<(), String> {
@@ -118,16 +119,21 @@ impl ImageDeduper {
                     // Try to raise to hard limit or 4096, whichever is lower
                     let new_soft = std::cmp::min(hard, 4096);
                     if new_soft > soft {
-                        if let Err(e) = rlimit::setrlimit(rlimit::Resource::NOFILE, new_soft, hard) {
+                        if let Err(e) = rlimit::setrlimit(rlimit::Resource::NOFILE, new_soft, hard)
+                        {
                             log::warn!("Failed to increase file descriptor limit: {}", e);
                             return Err(e.to_string());
                         } else {
-                            log::info!("Increased file descriptor limit from {} to {}", soft, new_soft);
+                            log::info!(
+                                "Increased file descriptor limit from {} to {}",
+                                soft,
+                                new_soft
+                            );
                         }
                     }
                 }
                 Ok(())
-            },
+            }
             Err(e) => {
                 log::warn!("Failed to get file descriptor limits: {}", e);
                 Err(e.to_string())
@@ -158,19 +164,15 @@ impl ImageDeduper {
         Ok(())
     }
 
-    /// Discover all images in the provided directories
-    pub fn process_images(&self, image_files: &[ImageFile], force_rescan: bool) -> Result<()> {
+    /// Hash and persist all images in the provided directories
+    pub fn hash_and_persist(&self, image_files: &[ImageFile], force_rescan: bool) -> Result<()> {
+        println!("->> hash_and_persist called...");
+
         // Get current database stats
         let (current_db_count, _) = self.get_db_stats()?;
-        info!(
-            "Starting with {} images already in database",
+        println!(
+            "->> Starting with {} images already in database",
             current_db_count
-        );
-
-        // Log the exact count of images we're processing
-        info!(
-            "Processing {} images from supplied collection",
-            image_files.len()
         );
 
         // Perform a database diagnosis
@@ -181,8 +183,8 @@ impl ImageDeduper {
 
         // Determine which images need processing
         let paths_to_process = if force_rescan {
-            info!(
-                "Force rescan requested - processing all {} images",
+            println!(
+                "->> Force rescan requested - processing all {} images",
                 image_paths.len()
             );
             image_paths
@@ -194,7 +196,7 @@ impl ImageDeduper {
         };
 
         if paths_to_process.is_empty() {
-            info!("No new images to process");
+            println!("No new images to process");
             return Ok(());
         }
 
@@ -214,6 +216,10 @@ impl ImageDeduper {
         // Create progress tracker with:
         // - Total = already in DB + total images passed in
         // - Initial position = already in DB
+        print!(
+            "->> Starting process counter: {} {} {}",
+            total_images, already_processed, already_processed
+        );
         let progress =
             processing::ProgressTracker::new(total_images, already_processed, already_processed, 0);
 
