@@ -296,13 +296,13 @@ macro_rules! log_hash_error {
 
 // Functions for backward compatibility
 // These will use the caller location of these functions rather than the original caller
-pub fn log_file_error(path: &Path, operation: &str, error: &dyn std::error::Error) {
-    log_file_error!(path, operation, error);
-}
+// pub fn log_file_error(path: &Path, operation: &str, error: &dyn std::error::Error) {
+//     log_file_error!(path, operation, error);
+// }
 
-pub fn log_hash_error<E: std::fmt::Display>(path: &Path, error: E) {
-    log_hash_error!(path, error);
-}
+// pub fn log_hash_error<E: std::fmt::Display>(path: &Path, error: E) {
+//     log_hash_error!(path, error);
+// }
 
 /// Log file system modification
 ///

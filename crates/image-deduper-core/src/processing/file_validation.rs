@@ -1,7 +1,8 @@
+use crate::log_file_error;
+use log::info;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use log::info;
 
 /// Check if a file exists and can be accessed
 pub fn validate_file_exists<P: AsRef<Path>>(
@@ -14,18 +15,18 @@ pub fn validate_file_exists<P: AsRef<Path>>(
     // Check if file exists
     if !path_ref.exists() {
         // Log the error
-        crate::logging::log_file_error(
-            path_ref, 
-            "check_exists", 
+        log_file_error!(
+            path_ref,
+            "check_exists",
             &std::io::Error::new(std::io::ErrorKind::NotFound, "File does not exist")
         );
-        
+
         // Increment counters
         error_counter.fetch_add(1, Ordering::Relaxed);
         if let Some(counter) = progress_counter {
             counter.fetch_add(1, Ordering::Relaxed);
         }
-        
+
         return None;
     }
 
@@ -34,14 +35,14 @@ pub fn validate_file_exists<P: AsRef<Path>>(
         Ok(metadata) => Some(metadata),
         Err(e) => {
             // Log metadata error
-            crate::logging::log_file_error(path_ref, "metadata", &e);
-            
+            log_file_error!(path_ref, "metadata", &e);
+
             // Increment counters
             error_counter.fetch_add(1, Ordering::Relaxed);
             if let Some(counter) = progress_counter {
                 counter.fetch_add(1, Ordering::Relaxed);
             }
-            
+
             None
         }
     }
@@ -56,33 +57,35 @@ pub fn validate_file_size(
 ) -> bool {
     let file_size = metadata.len();
     let path_display = path.display().to_string();
-    
+
     // Check for zero-sized files
     if file_size == 0 {
         // Log zero-sized file
-        crate::logging::log_file_error(
-            path, 
-            "check_size", 
+        log_file_error!(
+            path,
+            "check_size",
             &std::io::Error::new(std::io::ErrorKind::InvalidData, "Zero-sized file")
         );
-        
+
         // Increment counters
         error_counter.fetch_add(1, Ordering::Relaxed);
         if let Some(counter) = progress_counter {
             counter.fetch_add(1, Ordering::Relaxed);
         }
-        
+
         return false;
     }
-    
+
     // For very large files, just log but don't skip
-    if file_size > 200_000_000 { // 200MB
+    if file_size > 200_000_000 {
+        // 200MB
         info!(
             "Processing large file ({}MB) with resize optimization: '{}'",
-            file_size / 1_000_000, path_display
+            file_size / 1_000_000,
+            path_display
         );
     }
-    
+
     // Handle specialized formats like TIFF
     if let Some(ext) = path.extension() {
         let ext_str = ext.to_string_lossy().to_lowercase();
@@ -91,12 +94,13 @@ pub fn validate_file_size(
                 // Large TIFF gets special handling through size checks already implemented in perceptual.rs
                 info!(
                     "Processing large TIFF file ({}MB) with specialized handler: '{}'",
-                    file_size / 1_000_000, path_display
+                    file_size / 1_000_000,
+                    path_display
                 );
             }
         }
     }
-    
+
     true
 }
 
