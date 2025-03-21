@@ -3,7 +3,6 @@ use image_deduper_core::logging::shutdown_logger;
 use image_deduper_core::Config;
 use image_deduper_core::ImageDeduper;
 use image_deduper_core::LogLevel;
-use image_deduper_core::PriorityRule;
 use image_deduper_core::Result;
 use log::info;
 /// Demonstrates the processing of images in a directory.
@@ -28,32 +27,16 @@ fn run_app() -> Result<()> {
     println!("Press Ctrl+C to gracefully stop processing");
 
     // let source_directory = PathBuf::from("/Volumes/SamsungT9/Mylio_22c15a");
-    let source_directory = PathBuf::from("/Users/richardlyon/Desktop/test_images");
+    let source_directory = PathBuf::from(
+        "/Users/richardlyon/dev/mine/rust/image-deduper/crates/image-deduper-core/tests/data",
+    );
 
     let config = Config {
-        dry_run: true, // Safe default
-        duplicates_dir: PathBuf::from("duplicates"),
-        delete_duplicates: false,
-        create_symlinks: false,
-        phash_threshold: 90,
-        generate_thumbnails: true,
-        backup_dir: Some(PathBuf::from("backup")),
-        max_depth: Some(5), // Limit directory depth
-        process_unsupported_formats: false,
+        database_name: Some(String::from("test_image_hash_db")),
         threads: num_cpus::get(), // Use all available CPUs
-        prioritization: vec![
-            PriorityRule::HighestResolution,
-            PriorityRule::LargestFileSize,
-            PriorityRule::OldestCreationDate,
-        ],
-        use_database: true,
-        database_path: Some(PathBuf::from("image_hash_db")),
         batch_size: Some(100),
         log_level: LogLevel::Debug,
-        use_gpu_acceleration: false, // Enable GPU acceleration
-        excluded_directories: vec![PathBuf::from(
-            "/Volumes/SamsungT9/Mylio_22c15a/Generated Images.bundle",
-        )],
+        ..Default::default()
     };
 
     let deduper = ImageDeduper::new(config);

@@ -54,7 +54,7 @@ fn run_app() -> Result<()> {
             PriorityRule::OldestCreationDate,
         ],
         use_database: true,
-        database_path: Some(PathBuf::from("image-deduper.db")),
+        database_name: Some(String::from("image_hash_db")),
         batch_size: Some(100),
         log_level: LogLevel::Debug,
         use_gpu_acceleration: false, // Enable GPU acceleration

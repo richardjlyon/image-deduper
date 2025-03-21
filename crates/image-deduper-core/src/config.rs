@@ -72,7 +72,7 @@ pub struct Config {
     pub use_database: bool,
 
     /// Path to the database file
-    pub database_path: Option<PathBuf>,
+    pub database_name: Option<String>,
 
     /// Batch size for processing images
     pub batch_size: Option<usize>,
@@ -108,7 +108,7 @@ impl Default for Config {
                 PriorityRule::OldestCreationDate,
             ],
             use_database: true,
-            database_path: Some(PathBuf::from("image_hash_db")),
+            database_name: Some(String::from("image_hash_db")),
             batch_size: Some(100),
             log_level: LogLevel::Info,
             excluded_directories: Vec::new(),
