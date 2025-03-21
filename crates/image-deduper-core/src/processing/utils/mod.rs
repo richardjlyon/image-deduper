@@ -1,6 +1,7 @@
 pub mod batch_processor;
 pub mod file_validation;
 pub mod hash_computation_with_timeout;
+pub mod image_processor;
 mod memory_management;
 mod progress;
 mod timeout_utils;

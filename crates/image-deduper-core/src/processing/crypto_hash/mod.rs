@@ -15,18 +15,6 @@
 //! # Errors
 //!
 //! This function will return an error if the file cannot be opened or read.
-//!
-//! # Example
-//!
-//! ```rust
-//! use my_crate::compute_cryptographic;
-//! use std::path::Path;
-//!
-//! let path = Path::new("path/to/your/file.txt");
-//! match compute_cryptographic(path) {
-//!     Ok(hash) => println!("File hash: {:?}", hash),
-//!     Err(e) => eprintln!("Error computing hash: {}", e),
-//! }
 use crate::error::Result;
 use blake3::Hash as Blake3Hash;
 
