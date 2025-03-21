@@ -1,0 +1,3 @@
+- Source of test images
+- License information
+- Purpose of each test image
