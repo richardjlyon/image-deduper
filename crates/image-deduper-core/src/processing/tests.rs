@@ -1,6 +1,16 @@
 #[cfg(test)]
 mod tests {
-    // Group 1: "happy path" cHash Tests
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    use crate::logging;
+
+    fn setup() {
+        INIT.call_once(|| {
+            logging::init_logger(false).ok();
+        });
+    }
+
+    // "happy path" cHash Tests
     mod valid_chash_tests {
         use crate::processing::core::compute_cryptographic;
         use crate::test_utils::get_test_data_path;
@@ -52,8 +62,9 @@ mod tests {
         );
     }
 
-    // Group 2: "happy path" pHash Tests
+    // "happy path" pHash Tests
     mod valid_phash_tests {
+        use super::*;
         use crate::processing::file_processing::phash_from_file;
         use crate::{processing::types::PHash, test_utils::get_test_data_path};
 
@@ -61,6 +72,7 @@ mod tests {
             ($test_name:ident, $format:expr, $filename:expr, $expected_hash:expr) => {
                 #[test]
                 fn $test_name() {
+                    setup();
                     let img_path = get_test_data_path(concat!($format, "/valid"), $filename);
                     let result = phash_from_file(&img_path).unwrap();
                     match result {
