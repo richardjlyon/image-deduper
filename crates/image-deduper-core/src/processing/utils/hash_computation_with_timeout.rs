@@ -1,6 +1,7 @@
 use crate::log_hash_error;
-use crate::processing::perceptual_hash::{phash_from_file, process_tiff_directly};
-use crate::processing::{compute_cryptographic, PHash};
+use crate::processing::file_processing::phash_from_file;
+use crate::processing::formats::tiff::process_tiff_directly;
+use crate::processing::{compute_cryptographic, types::PHash};
 use blake3::Hash as Blake3Hash;
 use log::info;
 use once_cell::sync::Lazy;

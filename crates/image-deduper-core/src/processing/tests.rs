@@ -53,10 +53,8 @@ mod tests {
 
     // Group 2: "happy path" pHash Tests
     mod valid_phash_tests {
-        use crate::{
-            processing::perceptual_hash::{phash_from_file, PHash},
-            test_utils::get_test_data_path,
-        };
+        use crate::processing::file_processing::phash_from_file;
+        use crate::{processing::types::PHash, test_utils::get_test_data_path};
 
         macro_rules! test_image_phash {
             ($test_name:ident, $format:expr, $filename:expr, $expected_hash:expr) => {
@@ -110,7 +108,8 @@ mod tests {
 
     // Group 3: pHash distance tests
     mod phash_distance_tests {
-        use crate::{processing::perceptual_hash::phash_from_file, test_utils::get_test_data_path};
+        use crate::processing::file_processing::phash_from_file;
+        use crate::test_utils::get_test_data_path;
 
         #[test]
         fn test_compressed() {

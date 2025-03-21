@@ -1,10 +1,8 @@
 use crate::log_hash_error;
+use crate::processing::file_validation::{validate_file_exists, validate_file_size};
+use crate::processing::types::ImageHashResult;
 use crate::processing::utils::hash_computation_with_timeout::{
     compute_cryptographic_hash_with_timeout, compute_perceptual_hash_with_timeout,
-};
-use crate::processing::{
-    file_validation::{validate_file_exists, validate_file_size},
-    ImageHashResult,
 };
 use std::path::PathBuf;
 

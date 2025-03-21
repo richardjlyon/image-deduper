@@ -6,8 +6,9 @@ use log::{info, warn};
 use rocksdb::{IteratorMode, Options as RdbOptions, WriteBatch, DB};
 
 use crate::error::Result;
-use crate::processing::perceptual_hash::PHash;
+
 use crate::processing::types::ImageHashResult;
+use crate::processing::types::PHash;
 use crate::Config;
 
 #[derive(Clone, Debug)]

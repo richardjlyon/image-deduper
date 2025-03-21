@@ -1,5 +1,5 @@
-use image_deduper_core::processing::perceptual_hash::PHash;
-use image_deduper_core::processing::{metal_phash, perceptual_hash};
+use image_deduper_core::processing::calculate_phash;
+use image_deduper_core::processing::{metal_phash, types::PHash};
 use image_deduper_core::Config;
 use rayon::prelude::*;
 use std::path::Path;
@@ -73,14 +73,14 @@ fn test_gpu_hash(image_path: &Path) {
             // Test 1: CPU hash
             println!("\nTesting CPU-based hashing...");
             // Warm up
-            let _ = perceptual_hash::calculate_phash(&img);
+            let _ = calculate_phash(&img);
 
             // Timed run
             let cpu_start = Instant::now();
             // Run multiple times for better timing
             let mut cpu_hash = PHash::Standard(0);
             for _ in 0..10 {
-                cpu_hash = perceptual_hash::calculate_phash(&img);
+                cpu_hash = calculate_phash(&img);
             }
             let cpu_duration = cpu_start.elapsed() / 10;
             if let PHash::Standard(hash) = cpu_hash {
@@ -101,10 +101,10 @@ fn test_gpu_hash(image_path: &Path) {
             // Test single large image on CPU first
             println!("Testing CPU with large image...");
             // Warm up
-            let _ = perceptual_hash::calculate_phash(&large_images[0]);
+            let _ = calculate_phash(&large_images[0]);
 
             let cpu_large_start = Instant::now();
-            let cpu_large_hash = perceptual_hash::calculate_phash(&large_images[0]);
+            let cpu_large_hash = calculate_phash(&large_images[0]);
             let cpu_large_duration = cpu_large_start.elapsed();
             if let PHash::Standard(hash) = cpu_large_hash {
                 println!(
@@ -144,7 +144,7 @@ fn test_gpu_hash(image_path: &Path) {
                 println!("1. Sequential CPU processing:");
                 let cpu_batch_start = Instant::now();
                 for img in &large_images {
-                    let _ = perceptual_hash::calculate_phash(img);
+                    let _ = calculate_phash(img);
                 }
                 let cpu_batch_duration = cpu_batch_start.elapsed();
                 println!(
@@ -165,7 +165,7 @@ fn test_gpu_hash(image_path: &Path) {
                 let cpu_parallel_start = Instant::now();
                 thread_pool.install(|| {
                     large_images.par_iter().for_each(|img| {
-                        let _ = perceptual_hash::calculate_phash(img);
+                        let _ = calculate_phash(img);
                     });
                 });
                 let cpu_parallel_duration = cpu_parallel_start.elapsed();

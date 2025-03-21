@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 use sysinfo::System;
 
-use crate::processing::perceptual_hash::PHash;
+use crate::processing::types::PHash;
 
 /// Supported image formats
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -19,7 +19,6 @@ pub enum ImageFormat {
     Raw, // Added RAW format
     Other(String),
 }
-
 impl ImageFormat {
     /// Determine format from file extension
     pub fn from_extension(ext: &str) -> Self {

@@ -3,8 +3,8 @@
 //! This module provides a unified interface for GPU-accelerated perceptual hashing,
 //! automatically falling back to CPU when GPU is not available or not enabled.
 
-use crate::processing::perceptual_hash::PHash;
-use crate::Config;
+use crate::processing::file_processing;
+use crate::{processing::types::PHash, Config};
 use image::DynamicImage;
 use std::path::Path;
 
@@ -15,7 +15,7 @@ pub fn phash_from_file<P: AsRef<Path>>(
     path: P,
 ) -> Result<PHash, image::ImageError> {
     // Always use CPU implementation as it's faster in benchmarks
-    return crate::processing::perceptual_hash::phash_from_file(path);
+    return file_processing::phash_from_file(path);
 
     // The code below is retained for future reference but currently disabled
     /*

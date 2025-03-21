@@ -4,12 +4,14 @@
 //! perceptual hash algorithms for image comparison. It achieves
 //! significant performance improvements over CPU-based methods.
 
-use crate::processing::perceptual_hash::PHash;
 use image::{DynamicImage, GenericImageView};
 use metal::{Device, MTLResourceOptions, MTLSize};
 use objc::rc::autoreleasepool;
 use std::path::Path;
 use std::sync::Once;
+
+use crate::processing::calculate_phash;
+use crate::processing::types::PHash;
 
 // Metal shader for calculating grayscale and generating perceptual hash
 static METAL_SHADER_SRC: &str = r#"
@@ -162,7 +164,7 @@ impl MetalContext {
         // This is a threshold where GPU overhead outweighs benefits
         let (width, height) = img.dimensions();
         if width < 1024 && height < 1024 {
-            return crate::processing::perceptual_hash::calculate_phash(img);
+            return calculate_phash(img);
         }
 
         autoreleasepool(|| {
@@ -301,7 +303,7 @@ pub fn gpu_accelerated_phash(img: &DynamicImage) -> PHash {
 
     // For small images, use standard CPU hash
     if width < 1024 && height < 1024 {
-        return crate::processing::perceptual_hash::calculate_phash(img);
+        return calculate_phash(img);
     }
 
     // For larger images, we can optionally resize them first to reduce processing time
@@ -338,11 +340,11 @@ pub fn gpu_accelerated_phash(img: &DynamicImage) -> PHash {
             image::imageops::FilterType::Lanczos3,
         );
 
-        return crate::processing::perceptual_hash::calculate_phash(&resized);
+        return calculate_phash(&resized);
     }
 
     // For moderately large images, use standard CPU hash directly
-    crate::processing::perceptual_hash::calculate_phash(img)
+    calculate_phash(img)
 }
 
 /// Calculate a perceptual hash from an image file with GPU acceleration if available
@@ -359,7 +361,7 @@ pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
                 // For small images, load directly and use standard CPU hash
                 if width < 1024 && height < 1024 {
                     let img = image::open(path_ref)?;
-                    return Ok(crate::processing::perceptual_hash::calculate_phash(&img));
+                    return Ok(calculate_phash(&img));
                 }
 
                 // For very large images (especially if GPU isn't available), resize before loading
@@ -394,9 +396,7 @@ pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
                         }
 
                         // Fall back to CPU implementation on resized image
-                        return Ok(crate::processing::perceptual_hash::calculate_phash(
-                            &resized,
-                        ));
+                        return Ok(calculate_phash(&resized));
                     }
                 }
             }
@@ -411,7 +411,7 @@ pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
 
     // For small images, use standard CPU hash
     if width < 1024 && height < 1024 {
-        return Ok(crate::processing::perceptual_hash::calculate_phash(&img));
+        return Ok(calculate_phash(&img));
     }
 
     // For larger images with GPU, use enhanced hash (1024-bit)
@@ -442,12 +442,10 @@ pub fn gpu_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::Imag
                 image::imageops::FilterType::Lanczos3,
             );
 
-            return Ok(crate::processing::perceptual_hash::calculate_phash(
-                &resized,
-            ));
+            return Ok(calculate_phash(&resized));
         }
 
         // Fall back to CPU implementation
-        Ok(crate::processing::perceptual_hash::calculate_phash(&img))
+        Ok(calculate_phash(&img))
     }
 }
