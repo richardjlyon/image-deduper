@@ -2,7 +2,8 @@
 mod tests {
     // Group 1: "happy path" cHash Tests
     mod valid_chash_tests {
-        use crate::{processing::compute_cryptographic, test_utils::get_test_data_path};
+        use crate::processing::core::compute_cryptographic;
+        use crate::test_utils::get_test_data_path;
 
         macro_rules! test_image_hash {
             ($test_name:ident, $format:expr, $filename:expr, $expected_hash:expr) => {
