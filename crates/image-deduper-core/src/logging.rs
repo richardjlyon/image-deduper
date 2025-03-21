@@ -1,22 +1,19 @@
 use crate::error::{Error, Result};
+use dotenv::dotenv;
 use log::{info, LevelFilter, Record};
 use log4rs::append::console::{ConsoleAppender, Target};
+use log4rs::config::{Appender, Config, Root};
+use log4rs::encode::pattern::PatternEncoder;
+use std::env;
 use std::sync::mpsc::{channel, Sender};
 use std::thread;
 use std::time::Duration; // Required for log4rs's Append trait
-
-use log4rs::config::{Appender, Config, Root};
-use log4rs::encode::pattern::PatternEncoder;
 
 // Custom appender for BetterStack
 use anyhow;
 use log4rs::append::Append;
 use log4rs::encode::Encode;
 use serde_json::json;
-
-// Constants for BetterStack
-const BETTERSTACK_API_URL: &str = "https://s1242865.eu-nbg-2.betterstackdata.com";
-const BETTERSTACK_API_TOKEN: &str = "K51dykwBd2Uwuv7UD8jcXphk";
 
 // Channel sender to send logs to background thread
 static mut LOG_SENDER: Option<Sender<String>> = None;
@@ -38,8 +35,20 @@ impl std::fmt::Debug for BetterStackAppender {
     }
 }
 
+fn get_betterstack_credentials() -> (String, String) {
+    dotenv().ok();
+
+    let api_url = env::var("BETTERSTACK_API_URL").expect("BETTERSTACK_API_URL not set in .env");
+    let api_token =
+        env::var("BETTERSTACK_API_TOKEN").expect("BETTERSTACK_API_TOKEN not set in .env");
+
+    (api_url, api_token)
+}
+
 impl BetterStackAppender {
     pub fn new(encoder: Box<dyn Encode + Send + Sync>, min_level: LevelFilter) -> Self {
+        let (api_url, api_token) = get_betterstack_credentials();
+
         // Start the background worker thread when creating the appender
         let (tx, rx) = channel::<String>();
 
@@ -58,9 +67,9 @@ impl BetterStackAppender {
             while let Ok(log_message) = rx.recv() {
                 // Don't block too long on sending logs
                 let _result = client
-                    .post(BETTERSTACK_API_URL)
+                    .post(&api_url)
                     .header("Content-Type", "application/json")
-                    .header("Authorization", format!("Bearer {}", BETTERSTACK_API_TOKEN))
+                    .header("Authorization", format!("Bearer {}", api_token))
                     .body(log_message)
                     .send();
 
@@ -425,11 +434,12 @@ pub fn _send_direct_betterstack_log(
     });
 
     // Send the log directly
+    let (api_url, api_token) = get_betterstack_credentials();
     let client = reqwest::blocking::Client::new();
     let response = client
-        .post(BETTERSTACK_API_URL)
+        .post(api_url)
         .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", BETTERSTACK_API_TOKEN))
+        .header("Authorization", format!("Bearer {}", api_token))
         .body(payload.to_string())
         .send()
         .map_err(|e| Error::Unknown(format!("Failed to send direct log to BetterStack: {}", e)))?;

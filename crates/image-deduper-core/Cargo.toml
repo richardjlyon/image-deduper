@@ -61,6 +61,7 @@ rlimit = "0.10.1" # For file descriptor limit management
 anyhow.workspace = true
 bincode = "2.0.1"
 directories = "6.0.0"
+dotenv = "0.15.0"
 
 [dev-dependencies]
 image.workspace = true
