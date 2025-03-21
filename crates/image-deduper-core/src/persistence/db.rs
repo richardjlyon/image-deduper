@@ -8,6 +8,7 @@ use rocksdb::{IteratorMode, Options as RdbOptions, WriteBatch, DB};
 use crate::error::Result;
 use crate::processing::perceptual_hash::PHash;
 use crate::processing::types::ImageHashResult;
+use crate::Config;
 
 #[derive(Clone, Debug)]
 pub struct DBImageData {
@@ -22,7 +23,7 @@ pub struct ImageHashDB {
 
 impl ImageHashDB {
     /// Create a new ImageGashDB
-    pub fn new(store_name: &str) -> Self {
+    pub fn new(config: &Config) -> Self {
         // Configure RocksDB options for better concurrent write performance
         let mut options = RdbOptions::default();
         options.create_if_missing(true);
@@ -38,7 +39,19 @@ impl ImageHashDB {
             .map(|proj_dirs| proj_dirs.config_dir().to_path_buf())
             .expect("Failed to get config directory");
 
-        store_path.push(PathBuf::from(store_name));
+        store_path.push(PathBuf::from(
+            config
+                .database_name
+                .as_ref()
+                .unwrap_or(&String::from("image_hash_db")),
+        ));
+
+        // Delete the data base if config.reinitialise_database is true
+        if config.reinitialise_database {
+            std::fs::remove_dir_all(&store_path).unwrap_or_default();
+            info!("Deleted existing database at: {}", store_path.display());
+        }
+
         info!("Opening RocksDB database at: {}", store_path.display());
 
         return Self {

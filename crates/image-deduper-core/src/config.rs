@@ -74,6 +74,9 @@ pub struct Config {
     /// Path to the database file
     pub database_name: Option<String>,
 
+    /// Reinitialise the database
+    pub reinitialise_database: bool,
+
     /// Batch size for processing images
     pub batch_size: Option<usize>,
 
@@ -101,7 +104,7 @@ impl Default for Config {
             backup_dir: Some(PathBuf::from("backup")),
             max_depth: None,
             process_unsupported_formats: false,
-            threads: 0, // Auto
+            threads: num_cpus::get(), // Use all available CPUs
             prioritization: vec![
                 PriorityRule::HighestResolution,
                 PriorityRule::LargestFileSize,
@@ -109,6 +112,7 @@ impl Default for Config {
             ],
             use_database: true,
             database_name: Some(String::from("image_hash_db")),
+            reinitialise_database: false,
             batch_size: Some(100),
             log_level: LogLevel::Info,
             excluded_directories: Vec::new(),

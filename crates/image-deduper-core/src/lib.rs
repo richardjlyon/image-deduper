@@ -95,7 +95,7 @@ impl ImageDeduper {
             }
         }
 
-        let db = ImageHashDB::new(config.database_name.as_ref().unwrap());
+        let db = ImageHashDB::new(&config);
         let memory_tracker = Arc::new(MemoryTracker::new());
         let _safety_manager = safety::SafetyManager::new(&config);
         let _shutdown_requested = Arc::new(AtomicBool::new(false));

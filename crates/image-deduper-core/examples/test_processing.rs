@@ -33,6 +33,7 @@ fn run_app() -> Result<()> {
 
     let config = Config {
         database_name: Some(String::from("test_image_hash_db")),
+        reinitialise_database: true,
         threads: num_cpus::get(), // Use all available CPUs
         batch_size: Some(100),
         log_level: LogLevel::Debug,
