@@ -46,7 +46,7 @@ fn run_app() -> Result<()> {
         ..Default::default()
     };
 
-    let deduper = ImageDeduper::new(config);
+    let deduper = ImageDeduper::new(&config);
 
     println!("Discovering images...");
     let images = deduper.discover_images(&[PathBuf::from("/Volumes/SamsungT9/Mylio_22c15a")])?;

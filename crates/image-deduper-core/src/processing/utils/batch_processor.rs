@@ -21,85 +21,38 @@ use crate::processing::image_processor::process_single_image;
 use log::info;
 use rayon::prelude::*;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
 
 use super::super::types::ImageHashResult;
 use super::MemoryTracker;
 
-/// Configuration for batch processing
-#[derive(Clone)]
-pub struct BatchConfig {
-    /// Maximum number of threads to use
-    pub thread_limit: usize,
-    /// Maximum number of images per batch
-    pub batch_size: usize,
-}
-
-impl Default for BatchConfig {
-    fn default() -> Self {
-        Self {
-            thread_limit: std::cmp::min(num_cpus::get(), 8),
-            batch_size: 30,
-        }
-    }
-}
-
 /// Process a batch of images and compute their hashes with error handling
 /// Returns a tuple of (successful results, error count)
-pub fn process_image_batch(
-    paths: &[PathBuf],
-    progress_counter: Option<&Arc<AtomicUsize>>,
-    config: Option<BatchConfig>,
-) -> (Vec<ImageHashResult>, usize) {
-    // Use default config if none provided
-    let config = config.unwrap_or_default();
-
+pub fn process_image_batch(paths: &[PathBuf]) -> Vec<ImageHashResult> {
     // Initialize memory tracker
-    let mut memory_tracker = MemoryTracker::new();
-
     info!("Processing batch of {} images...", paths.len());
-    memory_tracker.log_memory("batch start");
-
-    let batch_start = Instant::now();
-
-    // Use atomic counters for thread safety
-    let error_counter = Arc::new(AtomicUsize::new(0));
-    let processed_counter = Arc::new(AtomicUsize::new(0));
-
     // Configure thread pool
-    let thread_limit = config.thread_limit;
-    info!("Using {} threads for image processing", thread_limit);
-
+    let thread_limit = std::cmp::min(num_cpus::get(), 8);
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(thread_limit)
         .build()
         .unwrap();
 
+    info!("Using {} threads for image processing", thread_limit);
+
+    let mut memory_tracker = MemoryTracker::new();
+    memory_tracker.log_memory("batch start"); // FIXME: refactor to use info!
+
     // Process images in parallel using a controlled thread pool
     let results: Vec<_> = pool.install(|| {
         paths
             .par_iter()
-            .map(|path| {
-                process_single_image(path, &error_counter, &processed_counter, progress_counter)
-            })
+            .map(|path| process_single_image(path))
             .filter_map(|r| r)
             .collect()
     });
 
-    let batch_duration = batch_start.elapsed();
-
     // Log final memory and timing stats
     let (end_mem, mem_diff) = memory_tracker.log_memory("batch completion");
-
-    // Log results
-    info!(
-        "Batch completed: {} successful, {} errors in {:.2?}",
-        results.len(),
-        error_counter.load(Ordering::Relaxed),
-        batch_duration
-    );
 
     // Log more detailed info
     info!(
@@ -112,15 +65,11 @@ pub fn process_image_batch(
     let result_estimate = results.len() * std::mem::size_of::<ImageHashResult>();
     info!("Approximate result size: ~{}KB", result_estimate / 1024);
 
-    (results, error_counter.load(Ordering::Relaxed))
+    results
 }
 
 /// Process images in batches for better memory management
-pub fn process_images_in_batches(
-    images: &[PathBuf],
-    batch_size: usize,
-    progress_counter: Option<&Arc<AtomicUsize>>,
-) -> Vec<ImageHashResult> {
+pub fn process_images_in_batches(images: &[PathBuf], batch_size: usize) -> Vec<ImageHashResult> {
     use sysinfo::System;
 
     // Initialize memory tracking
@@ -131,14 +80,7 @@ pub fn process_images_in_batches(
 
     let total_images = images.len();
     let mut results = Vec::new(); // Don't pre-allocate to avoid excess memory usage
-    let mut total_errors = 0;
     let batch_start = std::time::Instant::now();
-
-    // Set up batch configuration
-    let config = BatchConfig {
-        thread_limit: std::cmp::min(num_cpus::get(), 6),
-        batch_size,
-    };
 
     // Process images in sequential batches to control memory usage
     for (i, chunk) in images.chunks(batch_size).enumerate() {
@@ -148,11 +90,7 @@ pub fn process_images_in_batches(
         println!("Memory before batch {}: {}MB", i + 1, before_batch_mem);
 
         // Process this batch of images
-        let (batch_results, errors) =
-            process_image_batch(chunk, progress_counter, Some(config.clone()));
-
-        // Track errors
-        total_errors += errors;
+        let batch_results = process_image_batch(chunk);
 
         // Store results but limit memory usage
         let results_to_keep = std::cmp::min(batch_results.len(), 1000);
@@ -167,11 +105,10 @@ pub fn process_images_in_batches(
 
         // Log progress
         info!(
-            "Processed batch {}/{} ({} images, {} errors)",
+            "Processed batch {}/{} ({} images)",
             i + 1,
             (total_images + batch_size - 1) / batch_size,
             chunk.len(),
-            errors
         );
 
         // Memory cleanup and pause between batches
@@ -202,11 +139,7 @@ pub fn process_images_in_batches(
     };
     let batch_duration = batch_start.elapsed();
 
-    info!(
-        "Processing complete: {} successful, {} errors",
-        results.len(),
-        total_errors
-    );
+    info!("Processing complete: {} successful", results.len(),);
     info!("Total processing time: {:.2?}", batch_duration);
     info!(
         "Final memory usage: before={}MB, after={}MB, diff=+{}MB",
@@ -221,5 +154,5 @@ pub fn process_images(images: &[PathBuf]) -> Vec<ImageHashResult> {
     // Use a reasonable batch size to limit memory usage
     const DEFAULT_BATCH_SIZE: usize = 50;
 
-    process_images_in_batches(images, DEFAULT_BATCH_SIZE, None)
+    process_images_in_batches(images, DEFAULT_BATCH_SIZE)
 }

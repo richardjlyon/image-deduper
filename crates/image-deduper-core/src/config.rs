@@ -77,6 +77,9 @@ pub struct Config {
     /// Reinitialise the database
     pub reinitialise_database: bool,
 
+    /// Force a rescan of the database
+    pub force_rescan: bool,
+
     /// Batch size for processing images
     pub batch_size: Option<usize>,
 
@@ -113,6 +116,7 @@ impl Default for Config {
             use_database: true,
             database_name: Some(String::from("image_hash_db")),
             reinitialise_database: false,
+            force_rescan: false,
             batch_size: Some(100),
             log_level: LogLevel::Info,
             excluded_directories: Vec::new(),

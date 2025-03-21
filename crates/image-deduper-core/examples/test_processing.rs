@@ -35,24 +35,20 @@ fn run_app() -> Result<()> {
         database_name: Some(String::from("test_image_hash_db")),
         reinitialise_database: true,
         threads: num_cpus::get(), // Use all available CPUs
-        batch_size: Some(100),
+        batch_size: Some(10),
         log_level: LogLevel::Debug,
         ..Default::default()
     };
 
-    let deduper = ImageDeduper::new(config);
+    let deduper = ImageDeduper::new(&config);
 
     info!("Indexing {} for images...", source_directory.display());
-    let mut images = deduper.discover_images(&[source_directory])?;
+    let images = deduper.discover_images(&[source_directory])?;
     info!("Found {} images", images.len());
-
-    // Sort images by size
-    images.sort_by_key(|image| image.size);
-    info!("Processing images...");
 
     // Use force_rescan=true to process all test images
     info!("Calling hash_and_persist...");
-    let (final_pc_count, final_pp_count) = deduper.hash_and_persist(&images, false)?;
+    let (final_pc_count, final_pp_count) = deduper.hash_and_persist(&images, &config)?;
 
     // Display final database statistics
     println!("\nFinal database contents:");

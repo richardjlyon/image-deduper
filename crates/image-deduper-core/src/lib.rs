@@ -15,10 +15,7 @@ use persistence::ImageHashDB;
 use std::path::PathBuf;
 use std::{
     path::Path,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize},
-        Arc,
-    },
+    sync::{atomic::AtomicBool, Arc},
 };
 
 // -- Internal Modules --
@@ -69,7 +66,7 @@ pub struct ImageDeduper {
 
 impl ImageDeduper {
     /// Create a new ImageDeduper with the provided configuration
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: &Config) -> Self {
         let cpu_count = num_cpus::get();
         // Cap at 8 threads to prevent too many file handles
         let thread_count = std::cmp::min(cpu_count, 8);
@@ -101,53 +98,12 @@ impl ImageDeduper {
         let _shutdown_requested = Arc::new(AtomicBool::new(false));
 
         Self {
-            config,
+            config: config.clone(),
             db,
             memory_tracker,
             _safety_manager,
             _shutdown_requested,
         }
-    }
-
-    /// Try to increase the file descriptor limit on Unix systems
-    #[cfg(unix)]
-    fn increase_file_limit() -> std::result::Result<(), String> {
-        // Attempt to raise the file descriptor limit
-        match rlimit::getrlimit(rlimit::Resource::NOFILE) {
-            Ok((soft, hard)) => {
-                // Only try to increase if hard limit is higher than soft limit
-                if hard > soft {
-                    // Try to raise to hard limit or 4096, whichever is lower
-                    let new_soft = std::cmp::min(hard, 4096);
-                    if new_soft > soft {
-                        if let Err(e) = rlimit::setrlimit(rlimit::Resource::NOFILE, new_soft, hard)
-                        {
-                            log::warn!("Failed to increase file descriptor limit: {}", e);
-                            return Err(e.to_string());
-                        } else {
-                            log::info!(
-                                "Increased file descriptor limit from {} to {}",
-                                soft,
-                                new_soft
-                            );
-                        }
-                    }
-                }
-                Ok(())
-            }
-            Err(e) => {
-                log::warn!("Failed to get file descriptor limits: {}", e);
-                Err(e.to_string())
-            }
-        }
-    }
-
-    /// Discover all images in the provided directories
-    pub fn discover_images(
-        &self,
-        directories: &[impl AsRef<Path>],
-    ) -> Result<Vec<types::ImageFile>> {
-        discovery::discover_images(directories, &self.config)
     }
 
     /// Run the full deduplication pipeline
@@ -160,80 +116,33 @@ impl ImageDeduper {
         Ok(())
     }
 
+    /// Discover all images in the provided directories
+    pub fn discover_images(
+        &self,
+        directories: &[impl AsRef<Path>],
+    ) -> Result<Vec<types::ImageFile>> {
+        discovery::discover_images(directories, &self.config)
+    }
+
     /// Hash and persist all images in the provided directories
     pub fn hash_and_persist(
         &self,
         image_files: &[ImageFile],
-        force_rescan: bool,
+        config: &Config,
     ) -> Result<(usize, usize)> {
-        // Perform a database diagnosis
-        // diagnose_database(&self.db)?;
-
         // Get image paths from ImageFile objects
         let image_paths: Vec<PathBuf> = image_files.iter().map(|img| img.path.clone()).collect();
+        let images_to_process = self.get_images_to_process(config, image_paths)?;
 
-        // Determine which images need processing
-        let paths_to_process = if force_rescan {
-            info!(
-                "Force rescan requested - processing all {} images",
-                image_paths.len()
-            );
-            image_paths
-        } else {
-            // Filter out images already in database
-            let new_paths = self.db.find_new_images(&image_paths)?;
-            info!("Found {} new images to process", new_paths.len());
-            new_paths
-        };
-
-        if paths_to_process.is_empty() {
+        if images_to_process.is_empty() {
             info!("No new images to process");
             return Ok(self.db.get_db_stats()?);
         }
 
-        // Choose a smaller batch size to prevent file handle exhaustion
-        // This helps prevent hitting the "Too many open files" limit
-        const BATCH_SIZE: usize = 30;
-
-        // Create a smaller batch size for more frequent checkpoints and better resource management
-        let effective_batch_size = std::cmp::min(BATCH_SIZE, 10);
-
-        // Get current database stats
-        let (current_db_count, _) = self.db.get_db_stats()?;
-        info!(
-            "Starting processing with {} images already in database",
-            current_db_count
-        );
-
-        // Get stats for the progress tracker
-        let already_processed = current_db_count;
-        let total_images = image_files.len();
-        let total_batches =
-            (paths_to_process.len() + effective_batch_size - 1) / effective_batch_size;
-
-        // Create progress tracker with:
-        // - Total = already in DB + total images passed in
-        // - Initial position = already in DB
-        info!(
-            "Starting process counter: {} {} {}",
-            total_images, already_processed, already_processed
-        );
-        let progress =
-            processing::ProgressTracker::new(total_images, already_processed, already_processed, 0);
-
-        // Track success and error counts
-        let successful_count = Arc::new(AtomicUsize::new(0));
-        let error_count = Arc::new(AtomicUsize::new(0));
-
-        // Create a shared progress counter
-        let processed_count = Arc::new(AtomicUsize::new(0));
+        let batch_size = config.batch_size.unwrap_or(10);
 
         // Process images in smaller batches to manage memory usage
-        for (batch_idx, image_batch) in paths_to_process.chunks(effective_batch_size).enumerate() {
-            // Update progress tracker for new batch
-
-            progress.start_batch(image_batch.len(), batch_idx + 1, total_batches);
-
+        for (batch_idx, image_batch) in images_to_process.chunks(batch_size).enumerate() {
             // Update memory stats before processing
             let (pre_mem, _) = self.memory_tracker.update();
             info!(
@@ -242,33 +151,7 @@ impl ImageDeduper {
                 pre_mem / 1024 / 1024
             );
 
-            // Process this batch of images
-            let batch_results =
-                processing::process_image_batch(image_batch, Some(&processed_count), None);
-
-            // Update success and error counts
-            let batch_success = batch_results.0.len();
-            let batch_errors = batch_results.1;
-
-            // Add to our running counters
-            successful_count.fetch_add(batch_success, std::sync::atomic::Ordering::Relaxed);
-            error_count.fetch_add(batch_errors, std::sync::atomic::Ordering::Relaxed);
-
-            // Use only the counts from this run - do NOT add already_processed
-            let current_successful = successful_count.load(std::sync::atomic::Ordering::Relaxed);
-            let current_errors = error_count.load(std::sync::atomic::Ordering::Relaxed);
-
-            // Update the batch progress tracker with this batch's results
-            progress.update_batch(
-                batch_success + batch_errors,
-                format!("{} ok, {} errors", batch_success, batch_errors).as_str(),
-            );
-
-            // Complete the batch to calculate processing rate for this specific batch
-            progress.complete_batch(batch_success, batch_errors);
-
-            // Update the main progress bar with the overall totals
-            progress.increment(current_successful, current_errors);
+            let batch_results = processing::process_image_batch(image_batch);
 
             // Check memory usage after processing
             let (post_mem, diff) = self.memory_tracker.update();
@@ -278,47 +161,6 @@ impl ImageDeduper {
                 post_mem / 1024 / 1024,
                 diff / 1024 / 1024
             );
-
-            // Track batch status with detailed statistics
-            info!(
-                "Batch {} complete: {} successes, {} errors",
-                batch_idx + 1,
-                batch_results.0.len(),
-                batch_results.1
-            );
-
-            // Log file extensions that had errors if there were any errors
-            if batch_results.1 > 0 {
-                let error_extensions = image_batch
-                    .iter()
-                    .filter(|p| !batch_results.0.iter().any(|r| &r.path == *p))
-                    .filter_map(|p| p.extension().and_then(|e| e.to_str()))
-                    .collect::<Vec<_>>();
-
-                if !error_extensions.is_empty() {
-                    info!(
-                        "Problematic file extensions in batch {}: {:?}",
-                        batch_idx + 1,
-                        error_extensions
-                    );
-                }
-            }
-
-            // Store the results in the database with database-side error handling
-            if !batch_results.0.is_empty() {
-                // Use a custom write options to control memory usage
-                let mut write_opts = rocksdb::WriteOptions::default();
-                write_opts.set_sync(batch_idx % 5 == 0); // Periodically force sync
-
-                match self.db.batch_insert_hashes(&batch_results.0) {
-                    Ok(_) => {
-                        info!("Successfully inserted {} records", batch_results.0.len());
-                    }
-                    Err(e) => {
-                        warn!("Database insertion error: {}. Continuing...", e);
-                    }
-                }
-            }
 
             // Force cleanup of batch results
             drop(batch_results);
@@ -397,32 +239,61 @@ impl ImageDeduper {
             self.memory_tracker.peak_mb()
         );
 
-        // Get final counts - only from this run, do NOT add already_processed
-        let total_processed = processed_count.load(std::sync::atomic::Ordering::Relaxed);
-        let total_successful = successful_count.load(std::sync::atomic::Ordering::Relaxed);
-        let total_errors = error_count.load(std::sync::atomic::Ordering::Relaxed);
-
-        // Finalize the progress tracker
-        progress.finish(total_successful, total_errors);
-
-        // Gather final database statistics
-        let (final_db_count, _) = match self.db.get_db_stats() {
-            Ok(stats) => stats,
-            Err(_) => (0, 0), // Couldn't determine stats
-        };
-
-        let new_entries = final_db_count.saturating_sub(current_db_count);
-
-        // Log final stats to file
-        info!("Processing completed:");
-        info!("- Total processed: {}", total_processed);
-        info!("- Successful: {}", total_successful);
-        info!("- Errors: {}", total_errors);
-        info!("- New entries in database: {}", new_entries);
-        info!("- Peak memory usage: {}MB", self.memory_tracker.peak_mb());
-
         Ok(self.db.get_db_stats()?)
     }
-}
 
-// Helper functions moved to db.rs for better organization
+    // Helper function to determine which images need processing
+    fn get_images_to_process(
+        &self,
+        config: &Config,
+        image_paths: Vec<PathBuf>,
+    ) -> Result<Vec<PathBuf>> {
+        let paths_to_process = if config.force_rescan {
+            info!(
+                "Force rescan requested - processing all {} images",
+                image_paths.len()
+            );
+            image_paths
+        } else {
+            // Filter out images already in database
+            let new_paths = self.db.find_new_images(&image_paths)?;
+            info!("Found {} new images to process", new_paths.len());
+            new_paths
+        };
+        Ok(paths_to_process)
+    }
+
+    // Helper functions moved to db.rs for better organization
+    /// Try to increase the file descriptor limit on Unix systems
+    #[cfg(unix)]
+    fn increase_file_limit() -> std::result::Result<(), String> {
+        // Attempt to raise the file descriptor limit
+        match rlimit::getrlimit(rlimit::Resource::NOFILE) {
+            Ok((soft, hard)) => {
+                // Only try to increase if hard limit is higher than soft limit
+                if hard > soft {
+                    // Try to raise to hard limit or 4096, whichever is lower
+                    let new_soft = std::cmp::min(hard, 4096);
+                    if new_soft > soft {
+                        if let Err(e) = rlimit::setrlimit(rlimit::Resource::NOFILE, new_soft, hard)
+                        {
+                            log::warn!("Failed to increase file descriptor limit: {}", e);
+                            return Err(e.to_string());
+                        } else {
+                            log::info!(
+                                "Increased file descriptor limit from {} to {}",
+                                soft,
+                                new_soft
+                            );
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Err(e) => {
+                log::warn!("Failed to get file descriptor limits: {}", e);
+                Err(e.to_string())
+            }
+        }
+    }
+}

@@ -9,7 +9,6 @@ mod utils;
 // Public modules that remain unchanged
 
 pub mod perceptual_hash;
-pub mod process_images;
 
 // Expose cryptographic hash calculations
 pub use crypto_hash::*;

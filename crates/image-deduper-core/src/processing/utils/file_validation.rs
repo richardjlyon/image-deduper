@@ -4,15 +4,9 @@
 use crate::log_file_error;
 use log::info;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 
 /// Check if a file exists and can be accessed
-pub fn validate_file_exists<P: AsRef<Path>>(
-    path: P,
-    error_counter: &Arc<AtomicUsize>,
-    progress_counter: Option<&Arc<AtomicUsize>>,
-) -> Option<std::fs::Metadata> {
+pub fn validate_file_exists<P: AsRef<Path>>(path: P) -> Option<std::fs::Metadata> {
     let path_ref = path.as_ref();
 
     // Check if file exists
@@ -24,12 +18,6 @@ pub fn validate_file_exists<P: AsRef<Path>>(
             &std::io::Error::new(std::io::ErrorKind::NotFound, "File does not exist")
         );
 
-        // Increment counters
-        error_counter.fetch_add(1, Ordering::Relaxed);
-        if let Some(counter) = progress_counter {
-            counter.fetch_add(1, Ordering::Relaxed);
-        }
-
         return None;
     }
 
@@ -40,24 +28,13 @@ pub fn validate_file_exists<P: AsRef<Path>>(
             // Log metadata error
             log_file_error!(path_ref, "metadata", &e);
 
-            // Increment counters
-            error_counter.fetch_add(1, Ordering::Relaxed);
-            if let Some(counter) = progress_counter {
-                counter.fetch_add(1, Ordering::Relaxed);
-            }
-
             None
         }
     }
 }
 
 /// Check if file has valid size (not zero and not too large)
-pub fn validate_file_size(
-    path: &Path,
-    metadata: &std::fs::Metadata,
-    error_counter: &Arc<AtomicUsize>,
-    progress_counter: Option<&Arc<AtomicUsize>>,
-) -> bool {
+pub fn validate_file_size(path: &Path, metadata: &std::fs::Metadata) -> bool {
     let file_size = metadata.len();
     let path_display = path.display().to_string();
 
@@ -69,12 +46,6 @@ pub fn validate_file_size(
             "check_size",
             &std::io::Error::new(std::io::ErrorKind::InvalidData, "Zero-sized file")
         );
-
-        // Increment counters
-        error_counter.fetch_add(1, Ordering::Relaxed);
-        if let Some(counter) = progress_counter {
-            counter.fetch_add(1, Ordering::Relaxed);
-        }
 
         return false;
     }
