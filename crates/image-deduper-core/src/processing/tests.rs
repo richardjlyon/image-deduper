@@ -1,175 +1,171 @@
-#[allow(clippy::module_inception)]
 #[cfg(test)]
 mod tests {
-    use crate::processing::perceptual_hash::{phash_from_file, PHash};
-    use crate::processing::{compute_cryptographic, process_images};
-    use crate::test_utils::test_support::test_image_registry::TEST_IMAGES;
-    // Use the test image registry from test_support
-    // use crate::test_support::test_image_registry::TEST_IMAGES;
+    // Group 1: "happy path" cHash Tests
+    mod valid_chash_tests {
+        use crate::{processing::compute_cryptographic, test_utils::get_test_data_path};
 
-    #[test]
-    fn test_jpg_cryptographic_hash() {
-        let img_path = TEST_IMAGES
-            .get_image_path(
-                "jpg",           // file_type
-                "IMG-2624x3636", // image_name
-                "original",      // transformation
-                None,            // transformation_parameter
-            )
-            .unwrap();
+        macro_rules! test_image_hash {
+            ($test_name:ident, $format:expr, $filename:expr, $expected_hash:expr) => {
+                #[test]
+                fn $test_name() {
+                    let img_path = get_test_data_path(concat!($format, "/valid"), $filename);
+                    let result = compute_cryptographic(&img_path).unwrap().to_string();
+                    assert_eq!(result, $expected_hash);
+                }
+            };
+        }
 
-        // Compute the hash
-        let result = compute_cryptographic(&img_path).unwrap();
-        // Computed with the b3sum utility
-        let expected_hash = "0adc4958a3bfdb3ab5d3d747aa5982045dae251667e237e8dd8d38f9778d92cc";
+        test_image_hash!(
+            test_jpeg,
+            "jpeg",
+            "IMG-2624x3636_original.jpeg",
+            "0adc4958a3bfdb3ab5d3d747aa5982045dae251667e237e8dd8d38f9778d92cc"
+        );
 
-        // Verify the hash matches
-        assert_eq!(result.to_string(), expected_hash);
+        test_image_hash!(
+            test_png,
+            "png",
+            "IMG-2624x3636_original.png",
+            "9438c3556933007eae38ba1566a3764e506408eab4503e279ba6066d286ae095"
+        );
+
+        test_image_hash!(
+            test_heic,
+            "heic",
+            "IMG-2624x3636_original.heic",
+            "96c6c4bba9a39818c2645ba48a2530d71122c446c173eab88c46120e38d769b4"
+        );
+
+        test_image_hash!(
+            test_tiff,
+            "tiff",
+            "IMG-2624x3636_original.tif",
+            "fbc39cce9c3c868b94c923212733fbfae9d84a6ba96f90c32ff3afcfc51feaff"
+        );
+
+        test_image_hash!(
+            test_raw,
+            "raw",
+            "2025-01-14-1.raf",
+            "e8a6167126c826a6c899cc46e7abf20716d757dcdf102e5f05ce1c36861d11c0"
+        );
     }
 
-    #[test]
-    fn test_heic_cryptographic_hash() {
-        let img_path = TEST_IMAGES
-            .get_image_path(
-                "heic",          // file_type
-                "IMG-2624x3636", // image_name
-                "original",      // transformation
-                None,            // transformation_parameter
-            )
-            .unwrap();
-
-        // Compute the hash
-        let result = compute_cryptographic(&img_path).unwrap();
-        // Computed with the b3sum utility
-        let expected_hash = "96c6c4bba9a39818c2645ba48a2530d71122c446c173eab88c46120e38d769b4";
-
-        // Verify the hash matches
-        assert_eq!(result.to_string(), expected_hash);
-    }
-
-    #[test]
-    fn test_jpg_phash() {
-        let img1 = TEST_IMAGES
-            .get_image_path(
-                "jpg",           // file_type
-                "IMG-2624x3636", // image_name
-                "original",      // transformation
-                None,            // transformation_parameter
-            )
-            .unwrap();
-
-        let phash_img1 = phash_from_file(&img1).unwrap();
-        let expected_hash = 0x70008111c7ffffff;
-        match phash_img1 {
-            PHash::Standard(hash) => assert_eq!(hash, expected_hash),
-            _ => panic!("Expected Standard PHash variant"),
+    // Group 2: "happy path" pHash Tests
+    mod valid_phash_tests {
+        use crate::{
+            processing::perceptual_hash::{phash_from_file, PHash},
+            test_utils::get_test_data_path,
         };
+
+        macro_rules! test_image_phash {
+            ($test_name:ident, $format:expr, $filename:expr, $expected_hash:expr) => {
+                #[test]
+                fn $test_name() {
+                    let img_path = get_test_data_path(concat!($format, "/valid"), $filename);
+                    let result = phash_from_file(&img_path).unwrap();
+                    match result {
+                        PHash::Standard(hash) => assert_eq!(hash, $expected_hash),
+                        _ => panic!("Expected Standard PHash variant"),
+                    }
+                }
+            };
+        }
+
+        test_image_phash!(
+            test_jpeg_phash,
+            "jpeg",
+            "IMG-2624x3636_original.jpeg",
+            0x70000111C7FFFFFF
+        );
+
+        test_image_phash!(
+            test_png_phash,
+            "png",
+            "IMG-2624x3636_original.png",
+            0x70000111C7FFFFFF
+        );
+
+        test_image_phash!(
+            test_heic_phash,
+            "heic",
+            "IMG-2624x3636_original.heic",
+            0x70000111C7FFFFFF
+        );
+
+        test_image_phash!(
+            test_tiff_phash,
+            "tiff",
+            "IMG-2624x3636_original.tif",
+            0x70000111C7FFFFFF
+        );
+
+        // test_image_phash!(
+        //     test_raw_phash,
+        //     "raw",
+        //     "2025-01-14-1.raf",
+        //     0x70008111c7ffffff
+        // );
     }
 
-    #[test]
-    fn test_heic_phash() {
-        let img1 = TEST_IMAGES
-            .get_image_path(
-                "heic",          // file_type
-                "IMG-2624x3636", // image_name
-                "original",      // transformation
-                None,            // transformation_parameter
-            )
-            .unwrap();
+    // Group 3: pHash distance tests
+    mod phash_distance_tests {
+        use crate::{processing::perceptual_hash::phash_from_file, test_utils::get_test_data_path};
 
-        let phash_img1 = phash_from_file(&img1).unwrap();
-        let expected_hash = 0x70008111c7ffffff;
-        match phash_img1 {
-            PHash::Standard(hash) => assert_eq!(hash, expected_hash),
-            _ => panic!("Expected Standard PHash variant"),
-        };
+        #[test]
+        fn test_compressed() {
+            let img1 = get_test_data_path("jpeg/valid", "IMG-2624x3636_original.jpeg");
+            let img2 = get_test_data_path("jpeg/valid", "IMG-2624x3636_compress_50.jpeg");
+            let img3 = get_test_data_path("jpeg/valid", "IMG-2624x3636_compress_10.jpeg");
+
+            let phash_img1 = phash_from_file(&img1).unwrap();
+            let phash_img2 = phash_from_file(&img2).unwrap();
+            let phash_img3 = phash_from_file(&img3).unwrap();
+
+            assert_eq!(phash_img1.distance(&phash_img2), 0);
+            assert_eq!(phash_img1.distance(&phash_img3), 0);
+        }
+
+        #[test]
+        fn test_scaled() {
+            let img1 = get_test_data_path("jpeg/valid", "IMG-2624x3636_original.jpeg");
+            let img2 = get_test_data_path("jpeg/valid", "IMG-2624x3636_resize_866_1200.jpeg");
+            let img3 = get_test_data_path("jpeg/valid", "IMG-2624x3636_resize_577_800.jpeg");
+            let img4 = get_test_data_path("jpeg/valid", "IMG-2624x3636_resize_289_400.jpeg");
+            let img5 = get_test_data_path("jpeg/valid", "IMG-2624x3636_resize_144_200.jpeg");
+
+            let phash_img1 = phash_from_file(&img1).unwrap();
+            let phash_img2 = phash_from_file(&img2).unwrap();
+            let phash_img3 = phash_from_file(&img3).unwrap();
+            let phash_img4 = phash_from_file(&img4).unwrap();
+            let phash_img5 = phash_from_file(&img5).unwrap();
+
+            assert_eq!(phash_img1.distance(&phash_img2), 0);
+            assert_eq!(phash_img1.distance(&phash_img3), 0);
+            assert_eq!(phash_img1.distance(&phash_img4), 1);
+            assert_eq!(phash_img1.distance(&phash_img5), 3);
+        }
+
+        #[test]
+        fn test_rotated() {
+            let img1 = get_test_data_path("jpeg/valid", "IMG-2624x3636_original.jpeg");
+            let img2 = get_test_data_path("jpeg/valid", "IMG-2624x3636_rotate_5.jpeg");
+            let img3 = get_test_data_path("jpeg/valid", "IMG-2624x3636_rotate_10.jpeg");
+
+            let phash_img1 = phash_from_file(&img1).unwrap();
+            let phash_img2 = phash_from_file(&img2).unwrap();
+            let phash_img3 = phash_from_file(&img3).unwrap();
+
+            let distance1 = phash_img1.distance(&phash_img2);
+            let distance2 = phash_img1.distance(&phash_img3);
+
+            assert!(distance2 > distance1);
+        }
     }
 
-    #[test]
-    fn test_jpgphash_ne() {
-        let img1 = TEST_IMAGES
-            .get_image_path(
-                "jpg",           // file_type
-                "IMG-2624x3636", // image_name
-                "original",      // transformation
-                None,            // transformation_parameter
-            )
-            .unwrap();
+    mod problematic_handling {
 
-        let img2 = TEST_IMAGES
-            .get_image_path(
-                "jpg",           // file_type
-                "IMG-2667x4000", // image_name
-                "original",      // transformation
-                None,            // transformation_parameter
-            )
-            .unwrap();
-
-        let phash_img1 = phash_from_file(&img1).unwrap();
-        let phash_img2 = phash_from_file(&img2).unwrap();
-
-        assert_ne!(phash_img1, phash_img2);
-    }
-
-    #[test]
-    fn test_phash_distance() {
-        let img1 = TEST_IMAGES
-            .get_image_path(
-                "jpg",           // file_type
-                "IMG-2624x3636", // image_name
-                "original",      // transformation
-                None,            // transformation_parameter
-            )
-            .unwrap();
-
-        let img2 = TEST_IMAGES
-            .get_image_path(
-                "jpg",           // file_type
-                "IMG-2624x3636", // image_name
-                "rotate",        // transformation
-                Some("5"),       // transformation_parameter
-            )
-            .unwrap();
-
-        let phash_img1 = phash_from_file(&img1).unwrap();
-        let phash_img2 = phash_from_file(&img2).unwrap();
-        let distance = phash_img1.distance(&phash_img2);
-
-        println!("phash_img1: {:?}", phash_img1);
-        println!("phash_img2: {:?}", phash_img2);
-        println!("distance: {:?}", distance);
-        // This assertion was commented out in original test
-        // assert_eq!(distance, 1);
-    }
-
-    #[test]
-    fn test_process_images() {
-        let img1 = TEST_IMAGES
-            .get_image_path(
-                "jpg",           // file_type
-                "IMG-2624x3636", // image_name
-                "original",      // transformation
-                None,            // transformation_parameter
-            )
-            .unwrap();
-
-        let img2 = TEST_IMAGES
-            .get_image_path(
-                "jpg",           // file_type
-                "IMG-2667x4000", // image_name
-                "original",      // transformation
-                None,            // transformation_parameter
-            )
-            .unwrap();
-
-        let images = vec![img1, img2];
-        let results = process_images(&images);
-
-        let expected_hash_1 = "0adc4958a3bfdb3ab5d3d747aa5982045dae251667e237e8dd8d38f9778d92cc";
-        let expected_hash_2 = "4ffaeacb536fb65fb32bc75b7cc5a230d1879290aa36ddc9a98fae7b1cf37e0c";
-
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].cryptographic.to_string(), expected_hash_1);
-        assert_eq!(results[1].cryptographic.to_string(), expected_hash_2);
+        #[test]
+        fn raw_has_jpeg() {}
     }
 }

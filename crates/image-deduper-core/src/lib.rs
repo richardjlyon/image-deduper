@@ -181,7 +181,7 @@ impl ImageDeduper {
             image_paths
         } else {
             // Filter out images already in database
-            let new_paths = self.db.filter_new_images(&image_paths)?;
+            let new_paths = self.db.find_new_images(&image_paths)?;
             info!("Found {} new images to process", new_paths.len());
             new_paths
         };
@@ -381,8 +381,11 @@ impl ImageDeduper {
         }
 
         // Final database maintenance
-        match self.db.maintain_database() {
-            Ok(_) => info!("Final database maintenance completed successfully"),
+        match self.db.flush() {
+            Ok(_) => {
+                self.db.compact_range();
+                info!("Final database maintenance completed successfully");
+            }
             Err(e) => warn!("Final database maintenance error: {}. Continuing...", e),
         }
 
