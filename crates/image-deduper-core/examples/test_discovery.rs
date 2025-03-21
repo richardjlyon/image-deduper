@@ -30,7 +30,7 @@ fn main() -> Result<()> {
 
 fn run_app() -> Result<()> {
     // Initialize remote logging
-    logging::init_logger()?;
+    logging::init_logger(false)?;
 
     println!("Initializing image deduplication process...");
     println!("Press Ctrl+C to gracefully stop processing");

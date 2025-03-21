@@ -9,7 +9,7 @@ use log::info;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
-    logging::init_logger()?;
+    logging::init_logger(false)?;
 
     if let Err(e) = run_app() {
         log::error!("Application error: {}", e);

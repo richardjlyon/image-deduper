@@ -18,6 +18,73 @@ use serde_json::json;
 // Channel sender to send logs to background thread
 static mut LOG_SENDER: Option<Sender<String>> = None;
 
+/// Initialize the logger with timestamp, log level, and module path
+///
+/// args:
+///     use_better_stack (bool) : send logs to BetterStack
+///
+pub fn init_logger(use_better_stack: bool) -> Result<()> {
+    // Get log level from environment or default to info
+    let env_filter = std::env::var("DEDUP_LOG").unwrap_or_else(|_| "debug".to_string());
+    let level = env_filter
+        .parse::<LevelFilter>()
+        .unwrap_or(LevelFilter::Info);
+
+    // Create a console appender
+    let console_encoder = Box::new(PatternEncoder::new("[{l}] [{M}:{L}] - {m}\n"));
+    let console_appender = ConsoleAppender::builder()
+        .encoder(console_encoder)
+        .target(Target::Stdout)
+        .build();
+
+    // Build the logger configuration
+    let config_builder = Config::builder()
+        .appender(Appender::builder().build("console", Box::new(console_appender)));
+
+    // Add BetterStack appender only if enabled
+    let config_builder = if use_better_stack {
+        // Create BetterStack appender with appropriate log level
+        let betterstack_level = LevelFilter::Warn; // Only send warnings and above by default
+        let betterstack_encoder = Box::new(PatternEncoder::new("[{l}] [{M}:{L}] - {m}"));
+        let betterstack_appender = BetterStackAppender::new(betterstack_encoder, betterstack_level);
+
+        config_builder
+            .appender(Appender::builder().build("betterstack", Box::new(betterstack_appender)))
+    } else {
+        config_builder
+    };
+
+    // Build the root logger with appropriate appenders
+    let root_builder = Root::builder().appender("console");
+    let root_builder = if use_better_stack {
+        root_builder.appender("betterstack")
+    } else {
+        root_builder
+    };
+
+    let config = config_builder
+        .build(root_builder.build(level))
+        .map_err(|e| Error::Unknown(format!("Failed to build log config: {}", e)))?;
+
+    println!("->> logger config created");
+
+    // Use the configured logger
+    log4rs::init_config(config)
+        .map_err(|e| Error::Unknown(format!("Failed to initialize log4rs: {}", e)))?;
+
+    // Set the max level for the log crate as well
+    log::set_max_level(level);
+
+    info!("Image deduplication application started");
+    if use_better_stack {
+        info!(
+            "Remote logging to BetterStack enabled for level: {} and above",
+            LevelFilter::Warn
+        );
+    }
+    Ok(())
+}
+
 /// Custom BetterStack appender
 #[allow(dead_code)]
 pub struct BetterStackAppender {
@@ -236,56 +303,6 @@ impl Append for BetterStackAppender {
     fn flush(&self) {
         // No explicit flush needed as logs are sent asynchronously
     }
-}
-
-/// Initialize the logger with timestamp, log level, and module path
-/// Logs will be sent to BetterStack
-pub fn init_logger() -> Result<()> {
-    // Get log level from environment or default to info
-    let env_filter = std::env::var("DEDUP_LOG").unwrap_or_else(|_| "debug".to_string());
-    let level = env_filter
-        .parse::<LevelFilter>()
-        .unwrap_or(LevelFilter::Info);
-
-    // Create BetterStack appender with appropriate log level
-    let betterstack_level = LevelFilter::Warn; // Only send warnings and above by default
-    let betterstack_encoder = Box::new(PatternEncoder::new("[{l}] [{M}:{L}] - {m}"));
-    let betterstack_appender = BetterStackAppender::new(betterstack_encoder, betterstack_level);
-
-    // Create a console appender
-    let console_encoder = Box::new(PatternEncoder::new("[{l}] [{M}:{L}] - {m}\n"));
-    let console_appender = ConsoleAppender::builder()
-        .encoder(console_encoder)
-        .target(Target::Stdout)
-        .build();
-
-    // Build the logger configuration with only BetterStack appender
-    let config = Config::builder()
-        .appender(Appender::builder().build("betterstack", Box::new(betterstack_appender)))
-        .appender(Appender::builder().build("console", Box::new(console_appender)))
-        .build(
-            Root::builder()
-                .appender("betterstack")
-                .appender("console")
-                .build(level),
-        )
-        .map_err(|e| Error::Unknown(format!("Failed to build log config: {}", e)))?;
-
-    println!("->> logger config created");
-
-    // Use the configured logger
-    log4rs::init_config(config)
-        .map_err(|e| Error::Unknown(format!("Failed to initialize log4rs: {}", e)))?;
-
-    // Set the max level for the log crate as well
-    log::set_max_level(level);
-
-    info!("Image deduplication application started");
-    info!(
-        "Remote logging to BetterStack enabled for level: {} and above",
-        betterstack_level
-    );
-    Ok(())
 }
 
 /// Log file operation that failed

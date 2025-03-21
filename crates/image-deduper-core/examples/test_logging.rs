@@ -43,7 +43,7 @@ fn log_test_3() {
 
 fn main() -> Result<()> {
     // Initialize BetterStack logging
-    logging::init_logger()?;
+    logging::init_logger(true)?;
     println!("Logging initialized - testing BetterStack structured logging with source location tracking");
 
     // Call test functions with logging to demonstrate source location capture
