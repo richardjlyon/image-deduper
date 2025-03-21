@@ -15,8 +15,8 @@ use log4rs::encode::Encode;
 use serde_json::json;
 
 // Constants for BetterStack
-***REMOVED***
-***REMOVED***
+const BETTERSTACK_API_URL: &str = "https://s1242865.eu-nbg-2.betterstackdata.com";
+const BETTERSTACK_API_TOKEN: &str = "K51dykwBd2Uwuv7UD8jcXphk";
 
 // Channel sender to send logs to background thread
 static mut LOG_SENDER: Option<Sender<String>> = None;
