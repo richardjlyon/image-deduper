@@ -114,19 +114,18 @@ impl ImageHashDB {
         Ok(images)
     }
 
-    /// Filter a list of paths to only include those not already in the database
-    pub fn filter_new_images(&self, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    /// Find images that are not already in the database
+    pub fn find_new_images(&self, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
         use rayon::prelude::*;
         use std::time::Instant;
 
         info!("Starting to filter {} paths for new images...", paths.len());
         let start_time = Instant::now();
-
-        // Use smaller chunks for better feedback
-        const CHUNK_SIZE: usize = 1000;
         let mut new_paths = Vec::new();
 
         // Process in chunks to show progress
+        // Use smaller chunks for better feedback
+        const CHUNK_SIZE: usize = 1000;
         for (_chunk_idx, chunk) in paths.chunks(CHUNK_SIZE).enumerate() {
             // let chunk_start = Instant::now();
             let chunk_new_paths: Vec<PathBuf> = chunk
@@ -150,18 +149,18 @@ impl ImageHashDB {
         Ok(new_paths)
     }
 
-    /// Perform database maintenance operations
-    pub fn maintain_database(&self) -> Result<()> {
-        info!("Starting database maintenance...");
+    /// Check if hashes exist for a given path
+    fn check_hashes(&self, path: &PathBuf) -> Result<bool> {
+        let path_str = path.to_string_lossy().into_owned();
 
-        // Flush all write buffers to disk
-        self.flush()?;
+        // Check only the cryptographic hash for faster lookups
+        // We know both hashes are inserted together
+        let path_c_key = [b"pc:".to_vec(), path_str.as_bytes().to_vec()].concat();
 
-        // Trigger compaction on the entire database
-        self.compact_range();
+        // One database read is faster than two
+        let exists = self.db.get(&path_c_key)?.is_some();
 
-        info!("Database maintenance complete");
-        Ok(())
+        Ok(exists)
     }
 
     /// Flush memtable to disk
@@ -262,20 +261,6 @@ impl ImageHashDB {
         }
 
         Ok(())
-    }
-
-    /// Check if hashes exist for a given path
-    fn check_hashes(&self, path: &PathBuf) -> Result<bool> {
-        let path_str = path.to_string_lossy().into_owned();
-
-        // Check only the cryptographic hash for faster lookups
-        // We know both hashes are inserted together
-        let path_c_key = [b"pc:".to_vec(), path_str.as_bytes().to_vec()].concat();
-
-        // One database read is faster than two
-        let exists = self.db.get(&path_c_key)?.is_some();
-
-        Ok(exists)
     }
 }
 
