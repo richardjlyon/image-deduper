@@ -17,8 +17,10 @@ pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErr
         // Try processing with format-specific code
         match format {
             ImageFormat::Heic => return formats::heic::process_heic_image(path_ref),
-            // ImageFormat::Tiff => return formats::tiff::process_tiff_with_fallback(path_ref),
-            // ImageFormat::Raw => return formats::raw::process_raw_image(path_ref),
+            ImageFormat::Jpeg => return formats::jpeg::process_jpeg_image(path),
+            ImageFormat::Png => return formats::png::process_png_image(path),
+            ImageFormat::Tiff => return formats::tiff::process_tiff_image(path_ref),
+            ImageFormat::Raw => return formats::raw::process_raw_image(path_ref),
             _ => {} // Continue with standard processing
         }
     }

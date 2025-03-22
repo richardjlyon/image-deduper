@@ -1,39 +1,14 @@
 use std::io::Read;
 use std::path::Path;
 
+use log::{info, warn};
+
 use crate::processing::types::PHash;
 use crate::processing::{calculate_phash, platform};
 
-/// Helper function to check if a file is in HEIC format
-pub fn is_heic_format<P: AsRef<Path>>(path: P) -> bool {
-    // Use a block to ensure file is dropped at end of scope
-    let result = {
-        if let Ok(mut file) = std::fs::File::open(path.as_ref()) {
-            let mut buffer = [0; 12];
-            if file.read_exact(&mut buffer).is_ok() {
-                // HEIC/HEIF format signatures
-                if (buffer[4..8] == [b'f', b't', b'y', b'p'])
-                    || (buffer[4..8] == [b'h', b'e', b'i', b'c'])
-                    || (buffer[4..8] == [b'h', b'e', b'i', b'f'])
-                    || (buffer[4..8] == [b'm', b'i', b'f', b'1'])
-                {
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    };
-
-    result
-}
-
 /// Process HEIC image files
 pub fn process_heic_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+    info!("Processing HEIC image");
     let path_ref = path.as_ref();
 
     // Create a custom error for HEIC issues
@@ -47,8 +22,16 @@ pub fn process_heic_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::Image
     // Try platform-specific approach first (on macOS)
     #[cfg(target_os = "macos")]
     {
-        if let Ok(hash) = platform::macos::convert_with_sips(path_ref, "jpg", 1024) {
-            return Ok(hash);
+        match platform::macos::convert_with_sips(path_ref, 0) {
+            Ok(hash) => {
+                info!("Processed HEIC with SIPS");
+                return Ok(hash);
+            }
+            Err(e) => {
+                warn!("SIPS conversion failed: {:?}", e);
+                // You might want to continue to the next conversion method rather than return here
+                // return Err(e);
+            }
         }
     }
 
@@ -89,38 +72,38 @@ pub fn process_heic_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::Image
         // Convert to DynamicImage
         let dynamic_img = image::DynamicImage::ImageRgb8(img);
 
-        // Check if image is large - if so, resize before computing hash
-        if width > 1024 || height > 1024 {
-            log::info!(
-                "Downscaling large HEIC image ({}x{}) for perceptual hash: {}",
-                width,
-                height,
-                path_ref.display()
-            );
-
-            // Calculate target dimensions maintaining aspect ratio
-            let (target_width, target_height) = if width > height {
-                let scale = 1024.0 / width as f32;
-                (1024, (height as f32 * scale).round() as u32)
-            } else {
-                let scale = 1024.0 / height as f32;
-                ((width as f32 * scale).round() as u32, 1024)
-            };
-
-            // Resize the image
-            let resized = dynamic_img.resize(
-                target_width,
-                target_height,
-                image::imageops::FilterType::Lanczos3,
-            );
-
-            // Compute hash on resized image
-            return Ok(calculate_phash(&resized));
-        }
-
         // For smaller images, compute hash directly
         return Ok(calculate_phash(&dynamic_img));
     } else {
         return Err(heic_error("HEIC image doesn't have interleaved data"));
     }
+}
+
+/// Helper function to check if a file is in HEIC format
+pub fn is_heic_format<P: AsRef<Path>>(path: P) -> bool {
+    info!("Processing HEIC image");
+    // Use a block to ensure file is dropped at end of scope
+    let result = {
+        if let Ok(mut file) = std::fs::File::open(path.as_ref()) {
+            let mut buffer = [0; 12];
+            if file.read_exact(&mut buffer).is_ok() {
+                // HEIC/HEIF format signatures
+                if (buffer[4..8] == [b'f', b't', b'y', b'p'])
+                    || (buffer[4..8] == [b'h', b'e', b'i', b'c'])
+                    || (buffer[4..8] == [b'h', b'e', b'i', b'f'])
+                    || (buffer[4..8] == [b'm', b'i', b'f', b'1'])
+                {
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    };
+
+    result
 }

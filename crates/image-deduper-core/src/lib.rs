@@ -139,9 +139,8 @@ impl ImageDeduper {
             return Ok(self.db.get_db_stats()?);
         }
 
-        let batch_size = config.batch_size.unwrap_or(10);
-
         // Process images in smaller batches to manage memory usage
+        let batch_size = config.batch_size.unwrap_or(10);
         for (batch_idx, image_batch) in images_to_process.chunks(batch_size).enumerate() {
             // Update memory stats before processing
             let (pre_mem, _) = self.memory_tracker.update();
@@ -151,6 +150,7 @@ impl ImageDeduper {
                 pre_mem / 1024 / 1024
             );
 
+            // Process them
             let batch_results = processing::process_image_batch(image_batch);
 
             // Check memory usage after processing

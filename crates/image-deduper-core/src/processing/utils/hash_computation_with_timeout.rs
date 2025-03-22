@@ -1,6 +1,6 @@
 use crate::log_hash_error;
 use crate::processing::file_processing::phash_from_file;
-use crate::processing::formats::tiff::process_tiff_directly;
+use crate::processing::formats::tiff::process_tiff_image;
 use crate::processing::{compute_cryptographic, types::PHash};
 use blake3::Hash as Blake3Hash;
 use log::info;
@@ -125,7 +125,7 @@ pub fn compute_perceptual_hash_with_timeout(path: &Path) -> Result<PHash> {
             // Clone again for the inner closure
             let path_inner = path_copy.clone();
             execute_with_timeout(&path_copy, "TIFF processing", timeout, move || {
-                process_tiff_directly(&path_inner)
+                process_tiff_image(&path_inner)
             })
         } else {
             // Normal processing for regular files

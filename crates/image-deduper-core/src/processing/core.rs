@@ -35,6 +35,10 @@ pub fn compute_cryptographic<P: AsRef<Path>>(path: P) -> Result<Blake3Hash> {
 /// Calculate a standard 64-bit perceptual hash for an image (8x8 grid)
 #[inline]
 pub fn calculate_phash(img: &DynamicImage) -> PHash {
+    //
+    // TODO: evalute uysing SIPS for resizing on MacOS
+    //
+
     // Use fastest filter for downscaling
     let small = img.resize_exact(8, 8, image::imageops::FilterType::Nearest);
 

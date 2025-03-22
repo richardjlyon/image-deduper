@@ -26,4 +26,4 @@ pub use utils::hash_computation_with_timeout;
 pub use utils::*;
 
 #[cfg(test)]
-mod tests;
+mod processing_tests;

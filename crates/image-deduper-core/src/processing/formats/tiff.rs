@@ -8,7 +8,7 @@ use std::sync::Once;
 
 /// Public function for direct TIFF processing from external modules
 /// This provides access to the optimized TIFF handling
-pub fn process_tiff_directly<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+pub fn process_tiff_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
     // Try specialized downscaling first
     let result = process_tiff_with_downscaling(&path);
     if result.is_ok() {

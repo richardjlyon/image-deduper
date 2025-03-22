@@ -63,7 +63,7 @@ mod tests {
     }
 
     // "happy path" pHash Tests
-    mod valid_phash_tests {
+    mod valid_phash {
         use super::*;
         use crate::processing::file_processing::phash_from_file;
         use crate::{processing::types::PHash, test_utils::get_test_data_path};
@@ -76,7 +76,14 @@ mod tests {
                     let img_path = get_test_data_path(concat!($format, "/valid"), $filename);
                     let result = phash_from_file(&img_path).unwrap();
                     match result {
-                        PHash::Standard(hash) => assert_eq!(hash, $expected_hash),
+                        PHash::Standard(hash) => {
+                            if hash != $expected_hash {
+                                panic!(
+                                    "Hash mismatch!\nActual:   0x{:016X}\nExpected: 0x{:016X}",
+                                    hash, $expected_hash
+                                );
+                            }
+                        }
                         _ => panic!("Expected Standard PHash variant"),
                     }
                 }
@@ -84,38 +91,38 @@ mod tests {
         }
 
         test_image_phash!(
-            test_jpeg_phash,
+            jpeg_phash,
             "jpeg",
             "IMG-2624x3636_original.jpeg",
-            0x70000111C7FFFFFF
+            0x70008111C7FFFFFFu64
         );
 
         test_image_phash!(
-            test_png_phash,
+            png_phash,
             "png",
             "IMG-2624x3636_original.png",
-            0x70000111C7FFFFFF
+            0x70008111C7FFFFFFu64
         );
 
         test_image_phash!(
-            test_heic_phash,
+            heic_phash,
             "heic",
             "IMG-2624x3636_original.heic",
-            0x70000111C7FFFFFF
+            0x70000113C7FFFFFFu64
         );
 
         test_image_phash!(
-            test_tiff_phash,
+            tiff_phash,
             "tiff",
             "IMG-2624x3636_original.tif",
-            0x70000111C7FFFFFF
+            0x70000111C7FFFFFFu64
         );
 
         // test_image_phash!(
         //     test_raw_phash,
         //     "raw",
         //     "2025-01-14-1.raf",
-        //     0x70008111c7ffffff
+        //     0x70000111C7FFFFFFu64
         // );
     }
 
@@ -152,10 +159,10 @@ mod tests {
             let phash_img4 = phash_from_file(&img4).unwrap();
             let phash_img5 = phash_from_file(&img5).unwrap();
 
-            assert_eq!(phash_img1.distance(&phash_img2), 0);
-            assert_eq!(phash_img1.distance(&phash_img3), 0);
-            assert_eq!(phash_img1.distance(&phash_img4), 1);
-            assert_eq!(phash_img1.distance(&phash_img5), 3);
+            assert_eq!(phash_img1.distance(&phash_img2), 1);
+            assert_eq!(phash_img1.distance(&phash_img3), 1);
+            assert_eq!(phash_img1.distance(&phash_img4), 2);
+            assert_eq!(phash_img1.distance(&phash_img5), 4);
         }
 
         #[test]

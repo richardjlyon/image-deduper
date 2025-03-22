@@ -28,8 +28,8 @@ use super::MemoryTracker;
 /// Process a batch of images and compute their hashes with error handling
 /// Returns a tuple of (successful results, error count)
 pub fn process_image_batch(paths: &[PathBuf]) -> Vec<ImageHashResult> {
-    // Initialize memory tracker
     info!("Processing batch of {} images...", paths.len());
+
     // Configure thread pool
     let thread_limit = std::cmp::min(num_cpus::get(), 8);
     let pool = rayon::ThreadPoolBuilder::new()
@@ -37,8 +37,8 @@ pub fn process_image_batch(paths: &[PathBuf]) -> Vec<ImageHashResult> {
         .build()
         .unwrap();
 
+    // Initialize memory tracker
     info!("Using {} threads for image processing", thread_limit);
-
     let mut memory_tracker = MemoryTracker::new();
     memory_tracker.log_memory("batch start"); // FIXME: refactor to use info!
 
