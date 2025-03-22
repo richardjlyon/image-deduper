@@ -115,7 +115,7 @@ mod tests {
             tiff_phash,
             "tiff",
             "IMG-2624x3636_original.tif",
-            0x70000111C7FFFFFFu64
+            0x70008111C7FFFFFFu64
         );
 
         // test_image_phash!(

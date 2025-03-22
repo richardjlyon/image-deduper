@@ -1,3 +1,4 @@
+use crate::error::{Error, Result};
 use std::io::Read;
 use std::path::Path;
 
@@ -7,7 +8,7 @@ use crate::processing::types::PHash;
 use crate::processing::{calculate_phash, platform};
 
 /// Process HEIC image files
-pub fn process_heic_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+pub fn process_heic_image<P: AsRef<Path>>(path: P) -> Result<PHash> {
     info!("Processing HEIC image");
     let path_ref = path.as_ref();
 
@@ -75,7 +76,7 @@ pub fn process_heic_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::Image
         // For smaller images, compute hash directly
         return Ok(calculate_phash(&dynamic_img));
     } else {
-        return Err(heic_error("HEIC image doesn't have interleaved data"));
+        return Err(Error::HEICInterleaveError);
     }
 }
 

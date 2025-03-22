@@ -1,7 +1,10 @@
+use crate::error::{Error, Result};
 use std::hash::{Hash, Hasher};
 /// General file processing logic
 ///
 use std::path::Path;
+
+use log::warn;
 
 use crate::processing::{calculate_enhanced_phash, calculate_phash, formats};
 
@@ -9,7 +12,7 @@ use super::types::PHash;
 
 /// Calculate a perceptual hash from an image file
 /// Uses standard 8x8 hash by default
-pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash> {
     let path_ref = path.as_ref();
 
     // Check file extension and use format-specific handler if available
@@ -21,68 +24,24 @@ pub fn phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageErr
             ImageFormat::Png => return formats::png::process_png_image(path),
             ImageFormat::Tiff => return formats::tiff::process_tiff_image(path_ref),
             ImageFormat::Raw => return formats::raw::process_raw_image(path_ref),
-            _ => {} // Continue with standard processing
+            _ => {
+                warn!("No matching image handler");
+                return Err(Error::FormatHandling(format!(
+                    "No handler available for format: {:?}",
+                    format
+                )));
+            }
         }
     }
 
-    // Use our large image handling process to automatically resize if needed
-    match process_large_image(path_ref) {
-        Ok(hash) => return Ok(hash),
-        Err(e) => {
-            let error_str = format!("{:?}", e);
-
-            // CASE 1: HEIC file with incorrect extension
-            if error_str.contains("first two bytes are not an SOI marker") {
-                // Check if it's actually a HEIC file (regardless of extension)
-                if formats::heic::is_heic_format(path_ref) {
-                    log::warn!(
-                        "Found HEIC file with incorrect .jpg extension: {}",
-                        path_ref.display()
-                    );
-
-                    // Try to process it as a HEIC file
-                    return formats::heic::process_heic_image(path_ref);
-                } else {
-                    // If not HEIC, try to recover JPEG
-                    return formats::jpeg::recover_corrupted_jpeg(path_ref);
-                }
-            }
-
-            // CASE 2: Any TIFF errors or memory-related errors
-            if error_str.contains("LZW")
-                || error_str.contains("tiff")
-                || error_str.contains("TIFF")
-                || error_str.contains("invalid code")
-                || error_str.contains("memory")
-                || error_str.contains("Memory")
-                || error_str.contains("allocation")
-                || error_str.contains("resource")
-                || error_str.contains("out of memory")
-                || error_str.contains("limit")
-                || error_str.contains("exhausted")
-                || error_str.contains("exceeded")
-            {
-                log::warn!(
-                    "Identified TIFF-related error ({}), activating fallback: {}",
-                    e,
-                    path_ref.display()
-                );
-                return formats::tiff::process_tiff_with_fallback(path_ref);
-            }
-
-            // CASE 3: If we've gotten here, we can't process the image
-            log::warn!(
-                "Unhandled image error, giving up on: {}",
-                path_ref.display()
-            );
-            // Return the original error
-            return Err(e);
-        }
-    }
+    // If no format detected
+    Err(Error::FormatHandling(
+        "Could not detect image format".to_string(),
+    ))
 }
 
 /// Calculate an enhanced 1024-bit perceptual hash from an image file (32x32 grid)
-pub fn enhanced_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+pub fn enhanced_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash> {
     let path_ref = path.as_ref();
 
     // Check file extension and use format-specific handler if available
@@ -138,13 +97,13 @@ pub fn enhanced_phash_from_file<P: AsRef<Path>>(path: P) -> Result<PHash, image:
     // For standard formats or small images, use the regular load path
     match image::open(path_ref) {
         Ok(img) => Ok(calculate_enhanced_phash(&img)),
-        Err(e) => Err(e),
+        Err(e) => Err(Error::Image(e)),
     }
 }
 
 /// Process a large image by downscaling it for perceptual hash computation
 /// This allows us to handle very large images efficiently without timeouts
-pub fn process_large_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+pub fn process_large_image<P: AsRef<Path>>(path: P) -> Result<PHash> {
     let path_ref = path.as_ref();
 
     // Check file size first to determine optimal strategy

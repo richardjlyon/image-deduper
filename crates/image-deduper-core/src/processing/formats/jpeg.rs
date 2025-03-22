@@ -1,10 +1,11 @@
+use crate::error::{Error, Result};
 use log::info;
 use std::path::Path;
 
 use crate::processing::{calculate_phash, file_processing::generate_fallback_hash, types::PHash};
 
 /// Process a JPEG file with corruption recovery
-pub fn process_jpeg_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+pub fn process_jpeg_image<P: AsRef<Path>>(path: P) -> Result<PHash> {
     info!("Processing JPEG image");
 
     // Try to directly open the JPEG file
@@ -24,13 +25,13 @@ pub fn process_jpeg_image<P: AsRef<Path>>(path: P) -> Result<PHash, image::Image
 
             // Return original error
             log::warn!("Failed to recover corrupted JPEG");
-            Err(e)
+            Err(Error::Image(e))
         }
     }
 }
 
 /// Attempt to recover a corrupted JPEG file
-pub fn recover_corrupted_jpeg<P: AsRef<Path>>(path: P) -> Result<PHash, image::ImageError> {
+pub fn recover_corrupted_jpeg<P: AsRef<Path>>(path: P) -> Result<PHash> {
     let path_ref = path.as_ref();
 
     log::warn!(

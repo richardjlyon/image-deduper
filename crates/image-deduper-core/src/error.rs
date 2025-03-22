@@ -26,6 +26,9 @@ pub enum Error {
     #[error("Invalid configuration: {0}")]
     Configuration(String),
 
+    #[error("HEIC image doesn't have interleaved data")]
+    HEICInterleaveError,
+
     /// Safety check failure
     #[error("Safety check failed: {0}")]
     SafetyCheck(String),
@@ -33,6 +36,10 @@ pub enum Error {
     /// Unsupported image format
     #[error("Unsupported image format: {0}")]
     UnsupportedFormat(String),
+
+    /// Format handling error
+    #[error("Format handling error: {0}")]
+    FormatHandling(String),
 
     /// Unknown error
     #[error("Unknown error: {0}")]
